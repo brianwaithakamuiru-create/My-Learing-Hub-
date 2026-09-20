@@ -1,0 +1,233 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User academic profile and preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "fullName": { "type": "string", "description": "Student full name" },
+        "email": { "type": "string", "description": "Student email address" },
+        "username": { "type": "string", "description": "Unique username" },
+        "normalizedUsername": { "type": "string", "description": "Lowercased username" },
+        "country": { "type": "string", "description": "Country of study" },
+        "role": { "type": "string", "enum": ["student", "researcher", "admin"], "description": "Account role" },
+        "accountStatus": { "type": "string", "enum": ["ACTIVE", "DISABLED", "PENDING"], "description": "Account status" },
+        "avatarUrl": { "type": "string", "description": "Avatar image URL" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["uid", "fullName", "email", "username", "role", "accountStatus"]
+    },
+    "AcademicDocument": {
+      "title": "AcademicDocument",
+      "description": "Uploaded academic document metadata",
+      "type": "object",
+      "properties": {
+        "documentId": { "type": "string", "description": "Document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "title": { "type": "string", "description": "Document title" },
+        "originalFileName": { "type": "string", "description": "Original file name" },
+        "storagePath": { "type": "string", "description": "Cloud Storage path" },
+        "fileType": { "type": "string", "description": "File extension / type" },
+        "mimeType": { "type": "string", "description": "MIME type" },
+        "fileSize": { "type": "number", "description": "File size in bytes" },
+        "category": { "type": "string", "description": "Document category" },
+        "unitName": { "type": "string", "description": "Associated course name" },
+        "semester": { "type": "string", "description": "Academic semester" },
+        "academicYear": { "type": "string", "description": "Academic year" },
+        "description": { "type": "string", "description": "Brief description" },
+        "tags": { "type": "array", "description": "Tags list" },
+        "isFavorite": { "type": "boolean", "description": "Favorite flag" },
+        "isImportant": { "type": "boolean", "description": "Important flag" },
+        "downloadUrl": { "type": "string", "description": "Download or data URL" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "title", "fileType", "createdAt"]
+    },
+    "AcademicClass": {
+      "title": "AcademicClass",
+      "description": "Student enrolled class workspace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Class document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "code": { "type": "string", "description": "Course code e.g. CS 301" },
+        "name": { "type": "string", "description": "Course title" },
+        "instructor": { "type": "string", "description": "Professor or lecturer name" },
+        "room": { "type": "string", "description": "Lecture hall or room" },
+        "schedule": { "type": "string", "description": "Weekly meeting times" },
+        "semester": { "type": "string", "description": "Academic semester" },
+        "color": { "type": "string", "description": "Color accent identifier" },
+        "credits": { "type": "number", "description": "Credit units" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "code", "name"]
+    },
+    "AcademicAssignment": {
+      "title": "AcademicAssignment",
+      "description": "Student assignment or deliverable",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Assignment document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "title": { "type": "string", "description": "Assignment title" },
+        "course": { "type": "string", "description": "Associated course code or name" },
+        "dueDate": { "type": "string", "description": "Due date" },
+        "status": { "type": "string", "enum": ["Pending", "In Progress", "Submitted"], "description": "Status" },
+        "weight": { "type": "string", "description": "Percentage weight of final grade" },
+        "notes": { "type": "string", "description": "Submission guidelines or notes" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "title", "course", "dueDate", "status"]
+    },
+    "AcademicNote": {
+      "title": "AcademicNote",
+      "description": "Student lecture or revision note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Note document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "title": { "type": "string", "description": "Note title" },
+        "course": { "type": "string", "description": "Associated course code" },
+        "date": { "type": "string", "description": "Note date" },
+        "summary": { "type": "string", "description": "Content summary" },
+        "tags": { "type": "array", "description": "Associated tags" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "title", "course", "summary"]
+    },
+    "AcademicGoal": {
+      "title": "AcademicGoal",
+      "description": "Student semester or weekly academic goal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Goal document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "title": { "type": "string", "description": "Goal title" },
+        "target": { "type": "string", "description": "Measurable target" },
+        "progress": { "type": "number", "description": "Progress percentage 0-100" },
+        "category": { "type": "string", "description": "GPA, Study Hours, Projects, Revision" },
+        "completed": { "type": "boolean", "description": "Completed flag" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "title", "target"]
+    },
+    "FocusSession": {
+      "title": "FocusSession",
+      "description": "Deep work or Pomodoro study session log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Session document ID" },
+        "ownerId": { "type": "string", "description": "UID of the owner student" },
+        "task": { "type": "string", "description": "Task studied" },
+        "durationMinutes": { "type": "number", "description": "Minutes studied" },
+        "completedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "task", "durationMinutes", "completedAt"]
+    },
+    "TimetableEvent": {
+      "title": "TimetableEvent",
+      "description": "KEMU personal university class timetable slot",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "description": "Unique timetable event ID" },
+        "ownerId": { "type": "string", "description": "Authenticated Firebase user UID" },
+        "unitCode": { "type": "string", "description": "University unit / course code e.g. CIS 310" },
+        "unitName": { "type": "string", "description": "University unit / course title" },
+        "day": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], "description": "Day of the week" },
+        "startTime": { "type": "string", "description": "Class start time e.g. 08:00" },
+        "endTime": { "type": "string", "description": "Class end time e.g. 10:00" },
+        "building": { "type": "string", "description": "Campus building e.g. KEMU Hub or KEMU Towers" },
+        "location": { "type": "string", "description": "Detailed campus location" },
+        "roomNumber": { "type": "string", "description": "Room number e.g. Room 101, Lab 3, Hall 2" },
+        "lecturerName": { "type": "string", "description": "Lecturer or instructor name" },
+        "classType": { "type": "string", "description": "Lecture, Practical, Tutorial, Seminar, Clinical, or Workshop" },
+        "notes": { "type": "string", "description": "Optional notes or reminders for class" },
+        "reminderMinutes": { "type": "number", "description": "Minutes before class for reminder" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["ownerId", "unitCode", "unitName", "day", "startTime", "endTime", "building", "roomNumber"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Individual student profile documents"
+    },
+    "/users/{userId}/timetable/{eventId}": {
+      "schema": "TimetableEvent",
+      "description": "Personal university timetable schedule items"
+    },
+    "/users/{userId}/assignments/{assignmentId}": {
+      "schema": "AcademicAssignment",
+      "description": "Personal coursework deliverables and assignments"
+    },
+    "/users/{userId}/documents/{documentId}": {
+      "schema": "AcademicDocument",
+      "description": "Personal academic document records"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": "AcademicNote",
+      "description": "Personal lecture and study notes"
+    },
+    "/users/{userId}/revision/{revisionId}": {
+      "schema": "RevisionTopic",
+      "description": "Personal revision topics, questions, and flashcards"
+    },
+    "/users/{userId}/calendar/{eventId}": {
+      "schema": "CalendarEvent",
+      "description": "Personal calendar milestones and deadlines"
+    },
+    "/users/{userId}/exams/{examId}": {
+      "schema": "AcademicExam",
+      "description": "Personal exam schedules and preparation records"
+    },
+    "/users/{userId}/knowledge/{entryId}": {
+      "schema": "KnowledgeEntry",
+      "description": "Brian's Knowledge Vault library entries"
+    },
+    "/users/{userId}/goals/{goalId}": {
+      "schema": "AcademicGoal",
+      "description": "Personal academic goals and targets"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": "AcademicNotification",
+      "description": "Personal academic alerts and deadline notices"
+    },
+    "/users/{userId}/studySessions/{sessionId}": {
+      "schema": "FocusSession",
+      "description": "Study focus session history"
+    },
+    "/usernames/{username}": {
+      "schema": { "$ref": "UserProfile" },
+      "description": "Unique username registry"
+    },
+    "/documents/{documentId}": {
+      "schema": "AcademicDocument",
+      "description": "Academic documents repository"
+    },
+    "/classes/{classId}": {
+      "schema": "AcademicClass",
+      "description": "Enrolled classes"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "AcademicAssignment",
+      "description": "Academic assignments"
+    },
+    "/notes/{noteId}": {
+      "schema": "AcademicNote",
+      "description": "Lecture and study notes"
+    },
+    "/goals/{goalId}": {
+      "schema": "AcademicGoal",
+      "description": "Academic goals and targets"
+    },
+    "/focus_sessions/{sessionId}": {
+      "schema": "FocusSession",
+      "description": "Study focus session history"
+    }
+  }
+}
