@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth, mapFirebaseAuthError } from '../../context/AuthContext';
 import {
   Eye,
@@ -9,81 +9,71 @@ import {
   Loader2,
   BookOpen,
   AlertCircle,
-  Sparkles,
-  ExternalLink,
+  Check,
+  KeyRound,
+  UserPlus,
 } from 'lucide-react';
 
-interface LoginModalProps {
+interface LoginFormProps {
+  initialEmail?: string;
   onSuccess: () => void;
-  onSwitchToRegister: () => void;
-  onForgotPassword: () => void;
+  onSwitchToRegister: (email?: string) => void;
+  onForgotPassword: (email?: string) => void;
 }
 
-export const LoginForm: React.FC<LoginModalProps> = ({
+export const LoginForm: React.FC<LoginFormProps> = ({
+  initialEmail = '',
   onSuccess,
   onSwitchToRegister,
   onForgotPassword,
 }) => {
-  const { signIn, signInWithGoogle } = useAuth();
-  const [email, setEmail] = useState('');
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isOperationNotAllowed, setIsOperationNotAllowed] = useState(false);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
 
-  const handleGoogleAuth = async () => {
-    if (isGoogleSubmitting || isSubmitting) return;
-    setIsGoogleSubmitting(true);
-    setErrorMessage(null);
-    setIsOperationNotAllowed(false);
-
-    try {
-      await signInWithGoogle();
-      onSuccess();
-    } catch (err: any) {
-      console.error('Google Sign-in failed:', err);
-      const friendly = mapFirebaseAuthError(err);
-      setErrorMessage(friendly);
-    } finally {
-      setIsGoogleSubmitting(false);
+  useEffect(() => {
+    if (initialEmail && !email) {
+      setEmail(initialEmail);
     }
-  };
+  }, [initialEmail]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting || isGoogleSubmitting) return;
+    if (isSubmitting) return;
 
-    // Field validations
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
+      setErrorCode('validation/missing-email');
       setErrorMessage('Please enter your email address.');
       return;
     }
     if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorCode('validation/invalid-email');
       setErrorMessage('Please enter a valid email address.');
       return;
     }
     if (!password) {
+      setErrorCode('validation/missing-password');
       setErrorMessage('Please enter your password.');
       return;
     }
 
     setErrorMessage(null);
-    setIsOperationNotAllowed(false);
+    setErrorCode(null);
     setIsSubmitting(true);
 
     try {
       // Execute REAL Firebase Authentication
-      const profile = await signIn(cleanEmail, password);
-      console.log('Firebase authentication successful for:', profile.email);
+      await signIn(cleanEmail, password, rememberMe);
       onSuccess();
     } catch (err: any) {
-      console.error('Firebase sign in failure:', err);
-      if (err?.code === 'auth/operation-not-allowed' || String(err?.message).includes('operation-not-allowed')) {
-        setIsOperationNotAllowed(true);
-      }
+      const code = err?.code || '';
+      setErrorCode(code);
       const friendly = mapFirebaseAuthError(err);
       setErrorMessage(friendly);
     } finally {
@@ -91,119 +81,79 @@ export const LoginForm: React.FC<LoginModalProps> = ({
     }
   };
 
+  const isCredentialError =
+    errorCode === 'auth/invalid-credential' ||
+    errorCode === 'auth/wrong-password' ||
+    errorCode === 'auth/user-not-found';
+
   return (
     <div className="w-full max-w-md mx-auto">
-      <div className="glass-panel rounded-2xl p-6 sm:p-8 relative overflow-hidden border border-white/10 shadow-2xl">
-        {/* Header */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-400/30 text-cyan-400 mb-3 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+      <div className="glass-panel rounded-2xl p-6 sm:p-8 relative overflow-hidden border border-white/10 shadow-2xl backdrop-blur-xl">
+        {/* Subtle ambient light aura */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Header matching exact layout specification */}
+        <div className="text-center mb-6 relative z-10">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 mb-3 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
             <BookOpen className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white font-heading">
-            Sign In to Learning Hub
+          <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-widest block font-mono">
+            MY LEARNING HUB
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white font-heading mt-1">
+            Welcome Back
           </h1>
-          <p className="text-xs sm:text-sm text-slate-300 mt-1">
-            Access your courses, documents, and academic space
+          <p className="text-xs text-slate-300 mt-1.5">
+            Sign in to access your personal academic workspace
           </p>
         </div>
 
-        {/* 1-Click Google Sign In */}
-        <div className="mb-5">
-          <button
-            id="login-google-btn"
-            type="button"
-            disabled={isGoogleSubmitting || isSubmitting}
-            onClick={handleGoogleAuth}
-            className="w-full py-2.5 px-4 bg-white/10 hover:bg-white/15 border border-white/20 hover:border-cyan-400/40 text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-2.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
-          >
-            {isGoogleSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-                <span>Connecting with Google...</span>
-              </>
-            ) : (
-              <>
-                {/* Official Google 'G' Icon */}
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
-                </svg>
-                <span>Continue with Google</span>
-              </>
-            )}
-          </button>
-
-          <div className="relative my-4 flex items-center justify-center">
-            <div className="border-t border-white/10 w-full" />
-            <span className="bg-slate-900 px-3 text-[11px] text-slate-400 uppercase tracking-wider shrink-0">
-              or sign in with email
-            </span>
-          </div>
-        </div>
-
-        {/* Error Alert with Contextual Guidance */}
+        {/* Error Alert with Friendly Clear Text & Recovery Actions */}
         {errorMessage && (
           <div
             id="login-error-alert"
-            className="mb-5 p-4 rounded-xl bg-red-950/70 border border-red-500/40 text-red-200 text-xs animate-in fade-in duration-200 space-y-3"
+            className="mb-5 p-3.5 rounded-xl bg-red-950/70 border border-red-500/40 text-red-200 text-xs animate-in fade-in duration-200"
           >
             <div className="flex items-start space-x-2.5">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <div className="flex-1 leading-relaxed">{errorMessage}</div>
-            </div>
-
-            {isOperationNotAllowed && (
-              <div className="p-3 bg-slate-950/80 rounded-lg border border-cyan-500/30 text-slate-300 space-y-2">
-                <p className="text-[11px] text-cyan-300 font-medium">
-                  Instant Access Option:
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
-                    type="button"
-                    onClick={handleGoogleAuth}
-                    disabled={isGoogleSubmitting}
-                    className="px-3 py-1.5 bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 text-slate-950 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center space-x-1.5"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Sign in with Google</span>
-                  </button>
-                  <a
-                    href="https://console.firebase.google.com/project/gen-lang-client-0631618971/authentication/providers"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-white/10 flex items-center justify-center space-x-1.5"
-                  >
-                    <span>Enable Email/Password in Console</span>
-                    <ExternalLink className="w-3 h-3 text-slate-400" />
-                  </a>
-                </div>
+              <div className="flex-1 leading-relaxed">
+                <p className="font-semibold text-red-200">{errorMessage}</p>
+                {isCredentialError && (
+                  <div className="mt-2.5 pt-2 border-t border-red-500/25 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <button
+                      id="login-error-reset-link"
+                      type="button"
+                      onClick={() => onForgotPassword(email.trim())}
+                      className="text-[11px] text-cyan-300 hover:text-cyan-200 font-semibold underline underline-offset-2 cursor-pointer inline-flex items-center space-x-1"
+                    >
+                      <KeyRound className="w-3 h-3" />
+                      <span>Reset password</span>
+                    </button>
+                    <span className="hidden sm:inline text-red-400/50">•</span>
+                    <button
+                      id="login-error-register-link"
+                      type="button"
+                      onClick={() => onSwitchToRegister(email.trim())}
+                      className="text-[11px] text-cyan-300 hover:text-cyan-200 font-semibold underline underline-offset-2 cursor-pointer inline-flex items-center space-x-1"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      <span>Create new account</span>
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
           <div>
             <label
               htmlFor="signin-email"
               className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
             >
-              Email Address
+              Email
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -214,33 +164,25 @@ export const LoginForm: React.FC<LoginModalProps> = ({
                 type="email"
                 required
                 autoComplete="email"
-                disabled={isSubmitting || isGoogleSubmitting}
+                disabled={isSubmitting}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 placeholder="name@university.edu"
-                className="w-full glass-input text-white text-sm rounded-xl pl-10 pr-4 py-2.5 placeholder:text-slate-500 disabled:opacity-50"
+                className="w-full glass-input text-white text-sm rounded-xl pl-10 pr-4 py-2.5 placeholder:text-slate-500 disabled:opacity-50 transition-all border border-white/10 focus:border-cyan-400"
               />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label
-                htmlFor="signin-password"
-                className="block text-xs font-semibold text-slate-300 uppercase tracking-wider"
-              >
-                Password
-              </label>
-              <button
-                type="button"
-                id="signin-forgot-password-btn"
-                onClick={onForgotPassword}
-                disabled={isSubmitting || isGoogleSubmitting}
-                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium transition-colors cursor-pointer"
-              >
-                Forgot Password?
-              </button>
-            </div>
+            <label
+              htmlFor="signin-password"
+              className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5"
+            >
+              Password
+            </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                 <Lock className="w-4 h-4" />
@@ -250,11 +192,14 @@ export const LoginForm: React.FC<LoginModalProps> = ({
                 type={showPassword ? 'text' : 'password'}
                 required
                 autoComplete="current-password"
-                disabled={isSubmitting || isGoogleSubmitting}
+                disabled={isSubmitting}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 placeholder="••••••••"
-                className="w-full glass-input text-white text-sm rounded-xl pl-10 pr-11 py-2.5 placeholder:text-slate-500 disabled:opacity-50"
+                className="w-full glass-input text-white text-sm rounded-xl pl-10 pr-11 py-2.5 placeholder:text-slate-500 disabled:opacity-50 transition-all border border-white/10 focus:border-cyan-400"
               />
               <button
                 type="button"
@@ -269,12 +214,42 @@ export const LoginForm: React.FC<LoginModalProps> = ({
             </div>
           </div>
 
+          {/* Remember me & Forgot Password */}
+          <div className="flex items-center justify-between pt-1">
+            <label
+              htmlFor="remember-me-checkbox"
+              className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none"
+            >
+              <div
+                onClick={() => setRememberMe(!rememberMe)}
+                className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                  rememberMe
+                    ? 'bg-cyan-500 border-cyan-400 text-slate-950'
+                    : 'border-white/20 bg-slate-900/60 hover:border-white/40'
+                }`}
+              >
+                {rememberMe && <Check className="w-3 h-3 stroke-[3]" />}
+              </div>
+              <span onClick={() => setRememberMe(!rememberMe)}>Remember me</span>
+            </label>
+
+            <button
+              type="button"
+              id="signin-forgot-password-btn"
+              onClick={() => onForgotPassword(email.trim())}
+              disabled={isSubmitting}
+              className="text-xs text-cyan-400 hover:text-cyan-300 font-medium transition-colors cursor-pointer"
+            >
+              Forgot password?
+            </button>
+          </div>
+
           {/* Submit Button */}
           <button
             id="signin-submit-btn"
             type="submit"
-            disabled={isSubmitting || isGoogleSubmitting}
-            className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-slate-950 font-semibold text-sm rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_25px_rgba(34,211,238,0.5)] transition-all flex items-center justify-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+            disabled={isSubmitting}
+            className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-slate-950 font-bold text-sm rounded-xl shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_25px_rgba(34,211,238,0.5)] transition-all flex items-center justify-center space-x-2 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
           >
             {isSubmitting ? (
               <>
@@ -283,7 +258,7 @@ export const LoginForm: React.FC<LoginModalProps> = ({
               </>
             ) : (
               <>
-                <span>Sign In with Email</span>
+                <span>Log In</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -291,17 +266,17 @@ export const LoginForm: React.FC<LoginModalProps> = ({
         </form>
 
         {/* Footer switch to registration */}
-        <div className="mt-6 pt-4 border-t border-white/10 text-center">
+        <div className="mt-6 pt-5 border-t border-white/10 text-center relative z-10">
           <p className="text-xs text-slate-300">
             Don't have an account?{' '}
             <button
               id="signin-switch-to-register-btn"
               type="button"
-              onClick={onSwitchToRegister}
-              disabled={isSubmitting || isGoogleSubmitting}
-              className="text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer ml-1 hover:underline"
+              onClick={() => onSwitchToRegister(email.trim())}
+              disabled={isSubmitting}
+              className="text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer ml-1 hover:underline inline-flex items-center space-x-0.5"
             >
-              Create Account
+              <span>Create Account</span>
             </button>
           </p>
         </div>

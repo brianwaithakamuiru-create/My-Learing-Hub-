@@ -16,10 +16,10 @@ import {
   Settings,
   Search,
   Bell,
-  LogOut,
   Clock,
   ChevronRight,
   Flame,
+  LogOut,
 } from 'lucide-react';
 
 interface ClockNavProps {
@@ -108,16 +108,6 @@ export const ClockNavigation: React.FC<ClockNavProps> = ({
 
   const handleCenterClick = () => {
     setCenterOpen(!centerOpen);
-  };
-
-  const handleLogout = async () => {
-    try {
-      setCenterOpen(false);
-      await logout();
-      onNavigate('/');
-    } catch (e) {
-      console.error('Logout error:', e);
-    }
   };
 
   return (
@@ -256,8 +246,8 @@ export const ClockNavigation: React.FC<ClockNavProps> = ({
                     .toUpperCase()
                 : 'LH'}
             </div>
-            <span className="text-[11px] font-bold tracking-wider text-slate-100 uppercase font-heading">
-              My Learning Hub
+            <span className="text-[12px] font-bold tracking-wider text-slate-100 uppercase font-heading">
+              MY LEARNING HUB
             </span>
             <span className="text-[9px] text-cyan-400 font-medium tracking-wide mt-0.5">
               {centerOpen ? 'Close Menu' : 'Command Hub'}
@@ -273,10 +263,10 @@ export const ClockNavigation: React.FC<ClockNavProps> = ({
             >
               <div className="px-3 py-2 border-b border-white/10 mb-1">
                 <p className="text-xs font-semibold text-slate-200 truncate">
-                  {userProfile?.fullName || 'Academic Student'}
+                  {userProfile?.fullName || 'Brian Waithaka Muiru'}
                 </p>
                 <p className="text-[10px] text-cyan-400 font-mono truncate">
-                  @{userProfile?.username || 'user'} • {userProfile?.role || 'student'}
+                  @{userProfile?.username || 'brian_muiru'} • {userProfile?.role || 'student'}
                 </p>
               </div>
 
@@ -341,16 +331,21 @@ export const ClockNavigation: React.FC<ClockNavProps> = ({
                   <span>Library & Wallpaper Settings</span>
                 </button>
 
-                <div className="border-t border-white/10 my-1" />
-
-                <button
-                  id="hub-menu-logout"
-                  onClick={handleLogout}
-                  className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
+                <div className="pt-1 mt-1 border-t border-white/10">
+                  <button
+                    id="hub-menu-logout"
+                    type="button"
+                    onClick={async () => {
+                      setCenterOpen(false);
+                      await logout();
+                      onNavigate('/login');
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Log Out</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -366,11 +361,11 @@ export const ClockNavigation: React.FC<ClockNavProps> = ({
         >
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 font-bold text-xs">
-              {userProfile?.fullName?.[0] || 'L'}
+              {userProfile?.fullName?.[0] || 'B'}
             </div>
             <div className="text-left">
-              <span className="block text-xs font-bold font-heading text-slate-100">
-                My Learning Hub
+              <span className="block text-xs font-bold font-heading text-slate-100 uppercase">
+                MY LEARNING HUB
               </span>
               <span className="text-[10px] text-cyan-400">Command Center</span>
             </div>

@@ -1,6 +1,6 @@
 {
   "name": "My Learning Hub",
-  "description": "Personal academic workplace for KEMU featuring real Firebase Authentication, personal university timetable management with KEMU Hub and KEMU Towers locations, interactive clock navigation, and academic document management.",
+  "description": "Personal academic desktop-style workspace featuring direct access, university timetable management with KEMU Hub and Towers locations, clock navigation, deliverables, and document storage.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

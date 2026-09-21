@@ -7,296 +7,221 @@ import {
   signOut,
   sendPasswordResetEmail,
   sendEmailVerification,
-  GoogleAuthProvider,
-  signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
 } from 'firebase/auth';
 import {
   doc,
   getDoc,
   setDoc,
   runTransaction,
-  serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserProfile } from '../types';
+
+export const LOCAL_STORAGE_PROFILE_KEY = 'kemu_my_learning_hub_user_profile';
+
+export interface RegisterUserData {
+  fullName: string;
+  username: string;
+  email: string;
+  password: string;
+  country: string;
+  academicYear: string;
+  semester: string;
+}
 
 interface AuthContextType {
   currentUser: User | null;
   userProfile: UserProfile | null;
   loading: boolean;
   profileError: string | null;
-  signIn: (email: string, pass: string) => Promise<UserProfile>;
-  signInWithGoogle: () => Promise<UserProfile>;
-  registerUser: (data: {
-    fullName: string;
-    email: string;
-    username: string;
-    country: string;
-    password: string;
-  }) => Promise<UserProfile>;
+  updateProfile: (data: Partial<UserProfile>) => Promise<void>;
+  updateUserPreferences: (prefs: Partial<UserProfile['preferences']>) => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  signIn: (email: string, pass: string, rememberMe?: boolean) => Promise<UserProfile>;
+  registerUser: (data: RegisterUserData) => Promise<UserProfile>;
   resetPassword: (email: string) => Promise<void>;
   resendVerification: () => Promise<void>;
   logout: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-  updateUserPreferences: (prefs: Partial<UserProfile['preferences']>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Helper to map friendly Firebase error messages
 export function mapFirebaseAuthError(error: any): string {
   const code = error?.code || '';
-  switch (code) {
-    case 'auth/operation-not-allowed':
-      return 'Email/Password sign-in is not yet enabled in the Firebase Console. You can sign in immediately using "Continue with Google", or enable Email/Password provider in the Firebase Authentication console under Sign-in method.';
-    case 'auth/popup-closed-by-user':
-      return 'Google sign-in popup was closed before completing. Please try again.';
-    case 'auth/popup-blocked':
-      return 'Google sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled. Please contact support.';
-    case 'auth/user-not-found':
-      return 'No account was found with these credentials.';
-    case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-      return 'Incorrect email or password.';
-    case 'auth/email-already-in-use':
-      return 'An account with this email already exists. Please sign in instead.';
-    case 'auth/weak-password':
-      return 'Please choose a stronger password (at least 8 characters with uppercase, lowercase, and numbers).';
-    case 'auth/too-many-requests':
-      return 'Too many sign-in attempts. Please try again later.';
-    case 'auth/network-request-failed':
-      return 'Unable to connect. Check your internet connection and try again.';
-    default:
-      if (error?.message && !error.message.includes('Firebase:')) {
-        return error.message;
-      }
-      return 'Authentication failed. Please verify your details or continue with Google.';
+  const msg = error?.message || '';
+
+  if (
+    code === 'auth/wrong-password' ||
+    code === 'auth/invalid-credential' ||
+    code === 'auth/user-not-found'
+  ) {
+    return 'Incorrect email or password.';
   }
+  if (code === 'auth/invalid-email') {
+    return 'Please enter a valid email address.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'An account with this email already exists. Please log in instead.';
+  }
+  if (code === 'auth/weak-password') {
+    return 'Please choose a stronger password (at least 8 characters, letters & numbers).';
+  }
+  if (code === 'auth/network-request-failed' || msg.includes('network-request-failed')) {
+    return "We couldn't connect to the server. Please check your internet connection and try again.";
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many attempts. Please wait and try again later.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Email/Password sign-in is not enabled in Firebase Authentication. Please enable Email/Password provider in your Firebase Console.';
+  }
+  if (msg.includes('Username already taken') || msg === 'USERNAME_TAKEN') {
+    return 'That username is already in use. Please choose another username.';
+  }
+  return error?.message || 'An unexpected error occurred. Please try again.';
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_PROFILE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (_) {}
+    return null;
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  // Fetch or safely repair user profile from Firestore
-  const fetchUserProfile = async (firebaseUser: User): Promise<UserProfile | null> => {
-    try {
-      const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const snap = await getDoc(userDocRef);
-
-      if (snap.exists()) {
-        const data = snap.data() as UserProfile;
-        return data;
-      }
-
-      // Safe Profile Recovery Strategy:
-      // If Auth user exists but Firestore profile is missing (e.g. initial network cutoff)
-      console.warn('Profile document missing for auth user. Attempting automatic recovery...');
-      const fallbackUsername = (firebaseUser.email?.split('@')[0] || 'student').toLowerCase().replace(/[^a-z0-9_]/g, '');
-      const defaultProfile: UserProfile = {
-        uid: firebaseUser.uid,
-        fullName: firebaseUser.displayName || 'Academic Scholar',
-        email: firebaseUser.email || '',
-        username: fallbackUsername,
-        normalizedUsername: fallbackUsername,
-        country: 'United States',
-        role: 'student',
-        accountStatus: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        preferences: {
-          overlayStrength: 60,
-          backgroundBlur: 0,
-          clockAnimation: true,
-          backgroundPosition: 'center',
-        },
-      };
-
-      await setDoc(userDocRef, defaultProfile);
-      return defaultProfile;
-    } catch (err: any) {
-      console.error('Error fetching/repairing user profile:', err);
-      setProfileError('Failed to load user profile. Please check connection.');
-      return null;
-    }
-  };
-
+  // Monitor Firebase Authentication state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setLoading(true);
-      setProfileError(null);
+    let isMounted = true;
 
-      if (firebaseUser) {
-        setCurrentUser(firebaseUser);
-        const profile = await fetchUserProfile(firebaseUser);
-        setUserProfile(profile);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const snap = await getDoc(userDocRef);
+
+          if (snap.exists() && isMounted) {
+            const cloudProfile = snap.data() as UserProfile;
+            // Update last login timestamp
+            const updatedProfile: UserProfile = {
+              ...cloudProfile,
+              uid: user.uid,
+              email: user.email || cloudProfile.email,
+              emailVerified: user.emailVerified,
+              lastLoginAt: new Date().toISOString(),
+            };
+            setUserProfile(updatedProfile);
+            try {
+              localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(updatedProfile));
+            } catch (_) {}
+
+            // Persist lastLoginAt update to firestore
+            setDoc(userDocRef, { lastLoginAt: updatedProfile.lastLoginAt }, { merge: true }).catch(() => {});
+          } else if (isMounted) {
+            // First time login or fallback profile construction
+            const fallbackProfile: UserProfile = {
+              uid: user.uid,
+              fullName: user.displayName || 'Scholar',
+              email: user.email || '',
+              username: user.email?.split('@')[0] || `scholar_${user.uid.slice(0, 6)}`,
+              normalizedUsername: (user.email?.split('@')[0] || `scholar_${user.uid.slice(0, 6)}`).toLowerCase(),
+              country: 'Kenya',
+              academicYear: 'Year 3 (2026/2027)',
+              currentSemester: 'Trimester 2 - 2026',
+              semester: 'Trimester 2 - 2026',
+              role: 'student',
+              accountStatus: 'ACTIVE',
+              emailVerified: user.emailVerified,
+              avatarUrl: user.photoURL || '',
+              photoURL: user.photoURL || '',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              lastLoginAt: new Date().toISOString(),
+              preferences: {
+                overlayStrength: 60,
+                backgroundBlur: 0,
+                clockAnimation: true,
+                backgroundPosition: 'center',
+              },
+            };
+            setUserProfile(fallbackProfile);
+            try {
+              localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(fallbackProfile));
+            } catch (_) {}
+            setDoc(userDocRef, fallbackProfile, { merge: true }).catch(() => {});
+          }
+        } catch (err: any) {
+          console.error('Error fetching Firestore user profile onAuthStateChanged:', err);
+          if (isMounted) {
+            setProfileError('Failed to load user profile from database.');
+          }
+        }
       } else {
+        // User logged out or unauthenticated
         setCurrentUser(null);
         setUserProfile(null);
+        try {
+          localStorage.removeItem(LOCAL_STORAGE_PROFILE_KEY);
+        } catch (_) {}
       }
-      setLoading(false);
+
+      if (isMounted) {
+        setLoading(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
-  // Real Firebase Sign In
-  const signIn = async (email: string, pass: string): Promise<UserProfile> => {
+  // Update Profile
+  const updateProfile = async (data: Partial<UserProfile>): Promise<void> => {
+    if (!currentUser && !userProfile) return;
     setProfileError(null);
-    const credential = await signInWithEmailAndPassword(auth, email.trim(), pass);
-    const user = credential.user;
 
-    const profile = await fetchUserProfile(user);
-    if (!profile) {
-      throw new Error('Failed to retrieve user profile.');
-    }
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) return;
 
-    if (profile.accountStatus === 'DISABLED') {
-      await signOut(auth);
-      throw new Error('This account has been disabled. Please contact support.');
-    }
-
-    setUserProfile(profile);
-    return profile;
-  };
-
-  // Real Firebase Google Sign In
-  const signInWithGoogle = async (): Promise<UserProfile> => {
-    setProfileError(null);
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const credential = await signInWithPopup(auth, provider);
-    const user = credential.user;
-
-    const profile = await fetchUserProfile(user);
-    if (!profile) {
-      throw new Error('Failed to retrieve user profile from database.');
-    }
-
-    if (profile.accountStatus === 'DISABLED') {
-      await signOut(auth);
-      throw new Error('This account has been disabled. Please contact support.');
-    }
-
-    setUserProfile(profile);
-    return profile;
-  };
-
-  // Real Firebase Registration with Atomic Username Claim
-  const registerUser = async (data: {
-    fullName: string;
-    email: string;
-    username: string;
-    country: string;
-    password: string;
-  }): Promise<UserProfile> => {
-    setProfileError(null);
-    const normalized = data.username.trim().toLowerCase();
-
-    // 1. Enforce unique username claim check before account creation
-    const usernameDocRef = doc(db, 'usernames', normalized);
-    const usernameSnap = await getDoc(usernameDocRef);
-    if (usernameSnap.exists()) {
-      throw new Error('This username is already taken. Please choose another one.');
-    }
-
-    // 2. Real Firebase Auth creation
-    const credential = await createUserWithEmailAndPassword(auth, data.email.trim(), data.password);
-    const uid = credential.user.uid;
-
-    const newProfile: UserProfile = {
-      uid,
-      fullName: data.fullName.trim(),
-      email: data.email.trim(),
-      username: data.username.trim(),
-      normalizedUsername: normalized,
-      country: data.country || 'Global',
-      role: 'student', // Never grant admin from client registration
-      accountStatus: 'ACTIVE',
-      createdAt: new Date().toISOString(),
+    const updated: UserProfile = {
+      ...(userProfile as UserProfile),
+      ...data,
       updatedAt: new Date().toISOString(),
-      preferences: {
-        overlayStrength: 60,
-        backgroundBlur: 0,
-        clockAnimation: true,
-        backgroundPosition: 'center',
-      },
     };
+    setUserProfile(updated);
 
-    // 3. Atomically claim username and create user profile
     try {
-      await runTransaction(db, async (transaction) => {
-        const uSnap = await transaction.get(usernameDocRef);
-        if (uSnap.exists()) {
-          throw new Error('This username is already taken. Please choose another one.');
-        }
-
-        const userDocRef = doc(db, 'users', uid);
-        transaction.set(usernameDocRef, {
-          uid,
-          username: data.username.trim(),
-          createdAt: serverTimestamp(),
-        });
-        transaction.set(userDocRef, newProfile);
-      });
-    } catch (txError: any) {
-      console.error('Profile/Username creation transaction error:', txError);
-      // Fallback: direct setDoc if transaction fails or rules prevent atomic multi-doc in dev
-      try {
-        await setDoc(doc(db, 'users', uid), newProfile);
-        await setDoc(usernameDocRef, { uid, username: data.username.trim() });
-      } catch (directErr) {
-        console.error('Fallback direct setDoc error:', directErr);
-      }
-    }
-
-    // Optional verification email
-    try {
-      await sendEmailVerification(credential.user);
+      localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(updated));
     } catch (e) {
-      // Non-blocking in dev
-      console.log('Email verification send ignored or delayed:', e);
+      console.error('Failed to save profile to localStorage:', e);
     }
 
-    setUserProfile(newProfile);
-    return newProfile;
-  };
-
-  // Forgot Password
-  const resetPassword = async (email: string): Promise<void> => {
-    await sendPasswordResetEmail(auth, email.trim());
-  };
-
-  // Resend Verification
-  const resendVerification = async (): Promise<void> => {
-    if (auth.currentUser) {
-      await sendEmailVerification(auth.currentUser);
+    try {
+      const userDocRef = doc(db, 'users', activeUid);
+      await setDoc(userDocRef, updated, { merge: true });
+    } catch (err: any) {
+      console.error('Firestore profile sync error:', err);
+      setProfileError('Could not sync profile with Firestore.');
+      throw err;
     }
   };
 
-  // Logout
-  const logout = async (): Promise<void> => {
-    await signOut(auth);
-    setCurrentUser(null);
-    setUserProfile(null);
-  };
-
-  const refreshProfile = async (): Promise<void> => {
-    if (auth.currentUser) {
-      const p = await fetchUserProfile(auth.currentUser);
-      setUserProfile(p);
-    }
-  };
-
+  // Update Preferences
   const updateUserPreferences = async (prefs: Partial<UserProfile['preferences']>): Promise<void> => {
-    if (!currentUser || !userProfile) return;
-    const updated = {
+    if (!userProfile) return;
+    const activeUid = currentUser?.uid || userProfile.uid;
+
+    const updated: UserProfile = {
       ...userProfile,
       preferences: {
         ...userProfile.preferences,
@@ -305,10 +230,229 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: new Date().toISOString(),
     };
     setUserProfile(updated);
+
     try {
-      await setDoc(doc(db, 'users', currentUser.uid), updated, { merge: true });
+      localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(updated));
+      if (activeUid) {
+        await setDoc(doc(db, 'users', activeUid), updated, { merge: true });
+      }
     } catch (e) {
       console.error('Failed to update preferences:', e);
+    }
+  };
+
+  // Refresh Profile
+  const refreshProfile = async (): Promise<void> => {
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) return;
+
+    try {
+      const snap = await getDoc(doc(db, 'users', activeUid));
+      if (snap.exists()) {
+        const cloudData = snap.data() as UserProfile;
+        setUserProfile((prev) => (prev ? { ...prev, ...cloudData } : cloudData));
+        try {
+          localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(cloudData));
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.error('Error refreshing profile:', e);
+    }
+  };
+
+  // Sign In with Email & Password
+  const signIn = async (
+    email: string,
+    pass: string,
+    rememberMe: boolean = true
+  ): Promise<UserProfile> => {
+    // Set Auth Persistence based on Remember Me
+    try {
+      await setPersistence(
+        auth,
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      );
+    } catch (persistErr) {
+      console.warn('Persistence configuration warning:', persistErr);
+    }
+
+    // Authenticate with Firebase Authentication
+    const cleanEmail = email.trim().toLowerCase();
+    const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+    const user = userCredential.user;
+
+    // Fetch existing user profile
+    const userDocRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    let profile: UserProfile;
+    if (userSnap.exists()) {
+      profile = {
+        ...(userSnap.data() as UserProfile),
+        uid: user.uid,
+        email: user.email || cleanEmail,
+        emailVerified: user.emailVerified,
+        lastLoginAt: new Date().toISOString(),
+      };
+      // Update lastLoginAt in Firestore
+      await setDoc(userDocRef, { lastLoginAt: profile.lastLoginAt }, { merge: true });
+    } else {
+      // First-time fallback profile
+      profile = {
+        uid: user.uid,
+        fullName: user.displayName || cleanEmail.split('@')[0],
+        email: user.email || cleanEmail,
+        username: cleanEmail.split('@')[0],
+        normalizedUsername: cleanEmail.split('@')[0].toLowerCase(),
+        country: 'Kenya',
+        academicYear: 'Year 3 (2026/2027)',
+        currentSemester: 'Trimester 2 - 2026',
+        semester: 'Trimester 2 - 2026',
+        role: 'student',
+        accountStatus: 'ACTIVE',
+        emailVerified: user.emailVerified,
+        avatarUrl: '',
+        photoURL: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+        preferences: {
+          overlayStrength: 60,
+          backgroundBlur: 0,
+          clockAnimation: true,
+          backgroundPosition: 'center',
+        },
+      };
+      await setDoc(userDocRef, profile, { merge: true });
+    }
+
+    setCurrentUser(user);
+    setUserProfile(profile);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(profile));
+    } catch (_) {}
+
+    return profile;
+  };
+
+  // Register New User
+  const registerUser = async (data: RegisterUserData): Promise<UserProfile> => {
+    const cleanEmail = data.email.trim();
+    const cleanUsername = data.username.trim();
+    const normalizedUsername = cleanUsername.toLowerCase();
+    const cleanFullName = data.fullName.trim();
+    const cleanCountry = data.country.trim();
+    const cleanYear = data.academicYear.trim();
+    const cleanSemester = data.semester.trim();
+
+    // 1. Pre-check username availability
+    const usernameDocRef = doc(db, 'usernames', normalizedUsername);
+    const usernameCheck = await getDoc(usernameDocRef);
+    if (usernameCheck.exists()) {
+      throw new Error('Username already taken. Please choose another username.');
+    }
+
+    // 2. Create Firebase Authentication account
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      cleanEmail,
+      data.password
+    );
+    const user = userCredential.user;
+
+    // 3. Prepare User Profile
+    const newProfile: UserProfile = {
+      uid: user.uid,
+      fullName: cleanFullName,
+      username: cleanUsername,
+      normalizedUsername,
+      email: cleanEmail,
+      country: cleanCountry,
+      academicYear: cleanYear,
+      currentSemester: cleanSemester,
+      semester: cleanSemester,
+      role: 'student', // Never admin from public registration
+      accountStatus: 'ACTIVE',
+      emailVerified: user.emailVerified || false,
+      photoURL: '',
+      avatarUrl: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+      preferences: {
+        overlayStrength: 60,
+        backgroundBlur: 0,
+        clockAnimation: true,
+        backgroundPosition: 'center',
+      },
+    };
+
+    // 4. Claim username and store user profile in Firestore
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await runTransaction(db, async (transaction) => {
+        const uDoc = await transaction.get(usernameDocRef);
+        if (uDoc.exists()) {
+          throw new Error('USERNAME_TAKEN');
+        }
+        transaction.set(usernameDocRef, {
+          uid: user.uid,
+          username: cleanUsername,
+          createdAt: new Date().toISOString(),
+        });
+        transaction.set(userDocRef, newProfile);
+      });
+    } catch (txErr: any) {
+      // Rollback created Firebase auth account if username became claimed concurrently
+      try {
+        await user.delete();
+      } catch (delErr) {
+        console.warn('Rollback auth account deletion failed:', delErr);
+      }
+      if (txErr.message === 'USERNAME_TAKEN') {
+        throw new Error('Username already taken. Please choose another username.');
+      }
+      throw txErr;
+    }
+
+    // 5. Send Email Verification
+    try {
+      await sendEmailVerification(user);
+    } catch (verifErr) {
+      console.warn('Email verification send notice:', verifErr);
+    }
+
+    setCurrentUser(user);
+    setUserProfile(newProfile);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_PROFILE_KEY, JSON.stringify(newProfile));
+    } catch (_) {}
+
+    return newProfile;
+  };
+
+  // Reset Password
+  const resetPassword = async (email: string): Promise<void> => {
+    await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+  };
+
+  // Resend Email Verification
+  const resendVerification = async (): Promise<void> => {
+    if (auth.currentUser) {
+      await sendEmailVerification(auth.currentUser);
+    }
+  };
+
+  // Logout
+  const logout = async (): Promise<void> => {
+    try {
+      await signOut(auth);
+    } finally {
+      setCurrentUser(null);
+      setUserProfile(null);
+      try {
+        localStorage.removeItem(LOCAL_STORAGE_PROFILE_KEY);
+      } catch (_) {}
     }
   };
 
@@ -319,14 +463,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userProfile,
         loading,
         profileError,
+        updateProfile,
+        updateUserPreferences,
+        refreshProfile,
         signIn,
-        signInWithGoogle,
         registerUser,
         resetPassword,
         resendVerification,
         logout,
-        refreshProfile,
-        updateUserPreferences,
       }}
     >
       {children}

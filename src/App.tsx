@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LibraryBackground } from './components/LibraryBackground';
 import { ClockNavigation } from './components/ClockNavigation';
-import { LoginForm } from './components/auth/LoginForm';
-import { RegisterForm } from './components/auth/RegisterForm';
-import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
 import { DashboardView } from './components/DashboardView';
 import { DocumentLibraryView } from './components/documents/DocumentLibraryView';
 import { TimetableView } from './components/timetable/TimetableView';
@@ -21,63 +18,115 @@ import { GlobalSearchModal } from './components/search/GlobalSearchModal';
 import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
 import { FocusModeView } from './components/FocusModeView';
+import { LoginForm } from './components/auth/LoginForm';
+import { RegisterForm } from './components/auth/RegisterForm';
+import { ForgotPasswordForm } from './components/auth/ForgotPasswordForm';
+import { AuthLoadingScreen } from './components/auth/AuthLoadingScreen';
+import { HomeView } from './components/public/HomeView';
+import { AboutView } from './components/public/AboutView';
 import { fetchUserNotifications } from './services/workplaceService';
 import {
   BookOpen,
-  LogOut,
-  User,
   Search,
   Flame,
   Bell,
   Sparkles,
-  Layers,
-  MapPin,
-  Clock,
-  ShieldCheck,
-  CheckCircle2,
-  Calendar,
-  X,
-  GraduationCap,
+  LogOut,
+  UserPlus,
+  LogIn,
+  Home,
+  Info,
 } from 'lucide-react';
+
+const PROTECTED_ROUTES = new Set([
+  '/dashboard',
+  '/timetable',
+  '/classes',
+  '/assignments',
+  '/documents',
+  '/notes',
+  '/revision',
+  '/calendar',
+  '/exams',
+  '/knowledge',
+  '/knowledge-vault',
+  '/ai-study',
+  '/goals',
+  '/notifications',
+  '/focus-mode',
+  '/profile',
+  '/settings',
+]);
 
 function MainApp() {
   const { currentUser, userProfile, loading, logout } = useAuth();
 
-  // Navigation route state
-  const [currentRoute, setCurrentRoute] = useState<string>('/dashboard');
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'about'>('login');
-  const [regSuccessName, setRegSuccessName] = useState<string | null>(null);
+  // Route state
+  const [currentRoute, setCurrentRoute] = useState<string>(() => {
+    const hash = window.location.hash.replace('#', '');
+    return hash && hash.startsWith('/') ? hash : '/';
+  });
+
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [authEmailPrefill, setAuthEmailPrefill] = useState<string>('');
 
-  // Sync route with browser hash for reliable navigation
+  // Sync route with browser hash for bookmarking & navigation
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash.replace('#', '');
       if (hash && hash.startsWith('/')) {
         setCurrentRoute(hash);
+      } else {
+        setCurrentRoute(currentUser ? '/dashboard' : '/');
       }
     };
-    handleHash();
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
-  }, []);
+  }, [currentUser]);
+
+  // Route Guard & Protection Logic
+  useEffect(() => {
+    if (loading) return;
+
+    if (currentUser) {
+      // Authenticated users should not see auth forms or landing page
+      if (
+        currentRoute === '/' ||
+        currentRoute === '/home' ||
+        currentRoute === '/login' ||
+        currentRoute === '/register' ||
+        currentRoute === '/forgot-password'
+      ) {
+        setCurrentRoute('/dashboard');
+        window.location.hash = '/dashboard';
+      }
+    } else {
+      // Unauthenticated users trying to access protected routes must be redirected to /login
+      if (PROTECTED_ROUTES.has(currentRoute)) {
+        setCurrentRoute('/login');
+        window.location.hash = '/login';
+      }
+    }
+  }, [currentUser, loading, currentRoute]);
 
   // Global Ctrl+K / Cmd+K search shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSearchModalOpen((prev) => !prev);
+        if (currentUser) {
+          setSearchModalOpen((prev) => !prev);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [currentUser]);
 
-  // Load notification count when authenticated
+  // Load notification count in background for authenticated users
   useEffect(() => {
-    if (!userProfile?.uid) return;
+    if (!currentUser || !userProfile?.uid) return;
     const loadAlerts = async () => {
       try {
         const notifs = await fetchUserNotifications(userProfile.uid);
@@ -87,7 +136,7 @@ function MainApp() {
       }
     };
     loadAlerts();
-  }, [userProfile, currentRoute]);
+  }, [currentUser, userProfile, currentRoute]);
 
   const navigateTo = (route: string) => {
     setCurrentRoute(route);
@@ -95,213 +144,151 @@ function MainApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 1. Loading Screen
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigateTo('/login');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  // 1. Loading screen while Firebase verifies initial authentication
   if (loading) {
     return (
       <LibraryBackground>
-        <div className="flex-1 flex flex-col items-center justify-center min-h-screen p-6 text-center">
-          <div className="glass-panel rounded-2xl p-8 max-w-sm w-full flex flex-col items-center space-y-4 border border-cyan-500/30 shadow-2xl">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
-              <BookOpen className="w-7 h-7 text-cyan-400 absolute inset-0 m-auto" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white font-heading">
-                Loading your academic workspace...
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Authenticating with Google Firebase credentials
-              </p>
-            </div>
-          </div>
-        </div>
+        <AuthLoadingScreen />
       </LibraryBackground>
     );
   }
 
-  // 2. Unauthenticated Flow (Public Area)
+  // 2. Unauthenticated Layout
   if (!currentUser) {
     return (
       <LibraryBackground>
-        {/* Top Minimal Navigation Bar */}
-        <header className="w-full px-6 py-4 flex items-center justify-between border-b border-white/10 glass-panel">
+        {/* Unauthenticated Header Bar */}
+        <header className="w-full px-4 sm:px-8 py-3.5 flex items-center justify-between border-b border-white/10 glass-panel sticky top-0 z-40">
           <div
+            id="brand-logo-unauth"
             className="flex items-center space-x-3 cursor-pointer"
-            onClick={() => {
-              setAuthMode('login');
-              navigateTo('/');
-            }}
+            onClick={() => navigateTo('/')}
           >
-            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.25)]">
-              <BookOpen className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.25)]">
+              <BookOpen className="w-4 h-4" />
             </div>
             <div>
               <span className="text-sm font-bold tracking-tight text-white font-heading block">
                 My Learning Hub
               </span>
-              <span className="text-[10px] text-cyan-400 tracking-wider uppercase font-mono">
-                Kenya Methodist University • Academic Workspace
+              <span className="text-[9px] text-cyan-400 tracking-wider uppercase font-mono">
+                Academic Command Center
               </span>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          {/* Unauthenticated Navigation Links: Home, About, Login, Create Account */}
+          <nav className="flex items-center space-x-1 sm:space-x-3">
             <button
-              id="header-about-btn"
+              id="nav-unauth-home"
               type="button"
-              onClick={() => setAuthMode('about')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                authMode === 'about'
-                  ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-300'
-                  : 'text-slate-300 hover:text-white'
+              onClick={() => navigateTo('/')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                currentRoute === '/' || currentRoute === '/home'
+                  ? 'text-cyan-400 bg-white/5'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              About Hub
+              <Home className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Home</span>
             </button>
+
             <button
-              id="header-signin-btn"
+              id="nav-unauth-about"
               type="button"
-              onClick={() => setAuthMode('login')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                authMode === 'login'
-                  ? 'bg-cyan-500/20 border border-cyan-400 text-cyan-300'
-                  : 'text-slate-300 hover:text-white'
+              onClick={() => navigateTo('/about')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                currentRoute === '/about'
+                  ? 'text-cyan-400 bg-white/5'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              Sign In
+              <Info className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">About</span>
             </button>
+
             <button
-              id="header-register-btn"
+              id="nav-unauth-login"
               type="button"
-              onClick={() => setAuthMode('register')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                authMode === 'register'
-                  ? 'bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-950 font-bold shadow-lg'
-                  : 'bg-white/10 hover:bg-white/15 text-white border border-white/10'
+              onClick={() => navigateTo('/login')}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                currentRoute === '/login'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50'
+                  : 'bg-slate-900/80 border border-white/10 text-slate-200 hover:text-white hover:border-white/30'
               }`}
             >
-              Create Account
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Log In</span>
             </button>
-          </div>
+
+            <button
+              id="nav-unauth-register"
+              type="button"
+              onClick={() => navigateTo('/register')}
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-slate-950 text-xs font-bold shadow-[0_0_15px_rgba(34,211,238,0.25)] transition-all cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Create Account</span>
+              <span className="sm:hidden">Sign Up</span>
+            </button>
+          </nav>
         </header>
 
-        {/* Public Body */}
-        <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 my-auto max-w-4xl mx-auto w-full">
-          {/* Registration Success Notification */}
-          {regSuccessName && (
-            <div
-              id="registration-success-banner"
-              className="mb-6 max-w-md w-full p-4 rounded-2xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 text-xs sm:text-sm text-center animate-in fade-in"
-            >
-              <p className="font-semibold text-white">
-                Account created successfully. Welcome to My Learning Hub, {regSuccessName}.
-              </p>
-              <p className="text-[11px] text-emerald-300 mt-1">
-                Your profile has been created and verified in Cloud Firestore.
-              </p>
-            </div>
+        {/* Unauthenticated Pages Content */}
+        <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex items-center justify-center">
+          {(currentRoute === '/' || currentRoute === '/home') && (
+            <HomeView onNavigate={navigateTo} />
           )}
 
-          {authMode === 'about' && (
-            <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6 w-full animate-in fade-in">
-              <div className="text-center space-y-2">
-                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 text-xs font-semibold">
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span>Kenya Methodist University (KEMU)</span>
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-bold text-white font-heading">
-                  My Learning Hub Academic Workspace
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto">
-                  An integrated digital library and private academic productivity ecosystem designed for KEMU students.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 space-y-2">
-                  <div className="flex items-center space-x-2 text-cyan-400 font-bold">
-                    <MapPin className="w-4 h-4" />
-                    <span>KEMU Timetable Integration</span>
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Enter and track classes exactly as scheduled across KEMU Hub, KEMU Towers, or Online sessions with room numbers and conflict detection.
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 space-y-2">
-                  <div className="flex items-center space-x-2 text-indigo-400 font-bold">
-                    <Layers className="w-4 h-4" />
-                    <span>Academic Lifecycle</span>
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Complete assignment tracking, revision cards with confidence ratings, exam readiness countdowns, and Brian's Knowledge Vault.
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 space-y-2">
-                  <div className="flex items-center space-x-2 text-emerald-400 font-bold">
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>Real Firebase Cloud Storage</span>
-                  </div>
-                  <p className="text-slate-300 leading-relaxed">
-                    Every lecture note, uploaded document, timetable class, and goal persists reliably in Cloud Firestore under your verified student profile.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-center space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setAuthMode('login')}
-                  className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer"
-                >
-                  Enter Workspace
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthMode('register')}
-                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold cursor-pointer"
-                >
-                  Create Student Account
-                </button>
-              </div>
-            </div>
+          {currentRoute === '/about' && (
+            <AboutView onNavigate={navigateTo} />
           )}
 
-          {authMode === 'login' && (
+          {currentRoute === '/login' && (
             <LoginForm
-              onSuccess={() => {
-                navigateTo('/dashboard');
+              initialEmail={authEmailPrefill}
+              onSuccess={() => navigateTo('/dashboard')}
+              onSwitchToRegister={(em) => {
+                if (em) setAuthEmailPrefill(em);
+                navigateTo('/register');
               }}
-              onSwitchToRegister={() => {
-                setRegSuccessName(null);
-                setAuthMode('register');
-              }}
-              onForgotPassword={() => {
-                setRegSuccessName(null);
-                setAuthMode('forgot-password');
+              onForgotPassword={(em) => {
+                if (em) setAuthEmailPrefill(em);
+                navigateTo('/forgot-password');
               }}
             />
           )}
 
-          {authMode === 'register' && (
+          {currentRoute === '/register' && (
             <RegisterForm
-              onSuccess={(name) => {
-                setRegSuccessName(name);
-                navigateTo('/dashboard');
+              initialEmail={authEmailPrefill}
+              onSuccess={() => navigateTo('/dashboard')}
+              onSwitchToLogin={(em) => {
+                if (em) setAuthEmailPrefill(em);
+                navigateTo('/login');
               }}
-              onSwitchToLogin={() => {
-                setRegSuccessName(null);
-                setAuthMode('login');
+              onForgotPassword={(em) => {
+                if (em) setAuthEmailPrefill(em);
+                navigateTo('/forgot-password');
               }}
             />
           )}
 
-          {authMode === 'forgot-password' && (
+          {currentRoute === '/forgot-password' && (
             <ForgotPasswordForm
-              onBackToLogin={() => {
-                setRegSuccessName(null);
-                setAuthMode('login');
+              initialEmail={authEmailPrefill}
+              onBackToLogin={(em) => {
+                if (em) setAuthEmailPrefill(em);
+                navigateTo('/login');
               }}
             />
           )}
@@ -310,21 +297,17 @@ function MainApp() {
     );
   }
 
-  // 3. Authenticated Workspace Flow
-  const effectiveRoute =
-    currentRoute === '/' || currentRoute === '/login' || currentRoute === '/register'
-      ? '/dashboard'
-      : currentRoute;
-
+  // 3. Authenticated Layout
   return (
     <LibraryBackground>
       {/* Top Header Bar */}
       <header className="w-full px-4 sm:px-8 py-3.5 flex items-center justify-between border-b border-white/10 glass-panel sticky top-0 z-40">
         <div
+          id="brand-logo-auth"
           className="flex items-center space-x-3 cursor-pointer"
           onClick={() => navigateTo('/dashboard')}
         >
-          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400">
+          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.25)]">
             <BookOpen className="w-4 h-4" />
           </div>
           <div>
@@ -337,7 +320,7 @@ function MainApp() {
           </div>
         </div>
 
-        {/* Top Controls: Focus, Search, Notifications, Profile Pill, Logout */}
+        {/* Top Controls: Focus Sanctuary, AI Study, Search, Notifications, Profile Pill, Logout */}
         <div className="flex items-center space-x-2 sm:space-x-3">
           <button
             id="top-focus-btn"
@@ -348,6 +331,17 @@ function MainApp() {
           >
             <Flame className="w-3.5 h-3.5 text-amber-400" />
             <span className="hidden sm:inline">Focus Sanctuary</span>
+          </button>
+
+          <button
+            id="top-ai-study-btn"
+            type="button"
+            onClick={() => navigateTo('/ai-study')}
+            className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 text-xs font-semibold cursor-pointer transition-all"
+            title="AI Study Assistant"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>AI Study</span>
           </button>
 
           <button
@@ -366,7 +360,7 @@ function MainApp() {
             type="button"
             onClick={() => navigateTo('/notifications')}
             className={`relative p-2 rounded-xl border transition-all cursor-pointer ${
-              effectiveRoute === '/notifications'
+              currentRoute === '/notifications'
                 ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300'
                 : 'bg-slate-900/80 border-white/10 text-slate-400 hover:text-white'
             }`}
@@ -385,38 +379,36 @@ function MainApp() {
             id="top-profile-badge"
             onClick={() => navigateTo('/profile')}
             className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-white/10 hover:border-cyan-400/40 cursor-pointer transition-all"
+            title="Student Profile Configuration"
           >
             <div className="w-5 h-5 rounded-full bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-[10px] text-cyan-300 font-bold">
-              {userProfile?.fullName?.[0] || 'U'}
+              {userProfile?.fullName?.[0] || 'S'}
             </div>
-            <span className="text-xs font-medium text-slate-200 hidden md:inline truncate max-w-[120px]">
-              {userProfile?.fullName || 'Student'}
+            <span className="text-xs font-medium text-slate-200 hidden md:inline truncate max-w-[130px]">
+              {userProfile?.fullName || 'Scholar'}
             </span>
           </div>
 
-          {/* Logout Button */}
+          {/* Prominent Working Logout Button */}
           <button
             id="top-logout-btn"
             type="button"
-            onClick={async () => {
-              await logout();
-              navigateTo('/');
-            }}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-red-300 hover:text-red-200 bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 transition-all cursor-pointer"
-            title="Sign Out"
+            onClick={handleLogout}
+            className="flex items-center space-x-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-400 text-rose-300 text-xs font-semibold cursor-pointer transition-all"
+            title="Sign Out of Academic Workspace"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Logout</span>
+            <LogOut className="w-4 h-4 text-rose-400" />
+            <span className="hidden sm:inline">Log Out</span>
           </button>
         </div>
       </header>
 
-      {/* Main Layout: Clock Command Center + Workspace Content */}
+      {/* Main Layout: Clock Command Center + Dynamic Workspace Views */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
         {/* Interactive Clock Command Center */}
         <section className="flex flex-col items-center justify-center py-2">
           <ClockNavigation
-            currentRoute={effectiveRoute}
+            currentRoute={currentRoute}
             onNavigate={navigateTo}
             onOpenSearch={() => setSearchModalOpen(true)}
           />
@@ -424,25 +416,26 @@ function MainApp() {
 
         {/* Dynamic Page Views */}
         <section className="w-full">
-          {effectiveRoute === '/dashboard' && <DashboardView onNavigate={navigateTo} />}
-          {effectiveRoute === '/timetable' && <TimetableView onNavigate={navigateTo} />}
-          {effectiveRoute === '/assignments' && <AssignmentsView onNavigate={navigateTo} />}
-          {effectiveRoute === '/documents' && <DocumentLibraryView />}
-          {effectiveRoute === '/notes' && <NotesView onNavigate={navigateTo} />}
-          {effectiveRoute === '/revision' && <RevisionView onNavigate={navigateTo} />}
-          {effectiveRoute === '/calendar' && <CalendarView onNavigate={navigateTo} />}
-          {effectiveRoute === '/exams' && <ExamsView onNavigate={navigateTo} />}
-          {effectiveRoute === '/knowledge-vault' && (
+          {currentRoute === '/dashboard' && <DashboardView onNavigate={navigateTo} />}
+          {currentRoute === '/timetable' && <TimetableView onNavigate={navigateTo} />}
+          {currentRoute === '/classes' && <TimetableView onNavigate={navigateTo} />}
+          {currentRoute === '/assignments' && <AssignmentsView onNavigate={navigateTo} />}
+          {currentRoute === '/documents' && <DocumentLibraryView />}
+          {currentRoute === '/notes' && <NotesView onNavigate={navigateTo} />}
+          {currentRoute === '/revision' && <RevisionView onNavigate={navigateTo} />}
+          {currentRoute === '/calendar' && <CalendarView onNavigate={navigateTo} />}
+          {currentRoute === '/exams' && <ExamsView onNavigate={navigateTo} />}
+          {(currentRoute === '/knowledge' || currentRoute === '/knowledge-vault') && (
             <KnowledgeVaultView onNavigate={navigateTo} />
           )}
-          {effectiveRoute === '/ai-study' && <AIStudyView onNavigate={navigateTo} />}
-          {effectiveRoute === '/goals' && <GoalsView onNavigate={navigateTo} />}
-          {effectiveRoute === '/notifications' && (
+          {currentRoute === '/ai-study' && <AIStudyView onNavigate={navigateTo} />}
+          {currentRoute === '/goals' && <GoalsView onNavigate={navigateTo} />}
+          {currentRoute === '/notifications' && (
             <NotificationsView onNavigate={navigateTo} />
           )}
-          {effectiveRoute === '/focus-mode' && <FocusModeView onNavigate={navigateTo} />}
-          {effectiveRoute === '/settings' && <SettingsView />}
-          {effectiveRoute === '/profile' && <ProfileView />}
+          {currentRoute === '/focus-mode' && <FocusModeView onNavigate={navigateTo} />}
+          {currentRoute === '/settings' && <SettingsView />}
+          {currentRoute === '/profile' && <ProfileView />}
         </section>
       </main>
 

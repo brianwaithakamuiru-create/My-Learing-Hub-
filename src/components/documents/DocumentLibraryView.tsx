@@ -13,6 +13,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { AcademicDocument } from '../../types';
+import { fetchUserDocuments } from '../../services/workplaceService';
 import {
   FolderArchive,
   UploadCloud,
@@ -70,21 +71,17 @@ export const DocumentLibraryView: React.FC = () => {
   // Preview Modal
   const [previewDoc, setPreviewDoc] = useState<AcademicDocument | null>(null);
 
-  // Fetch documents for the authenticated user from Firestore
+  // Fetch documents for the student workspace from Firestore
   const fetchDocuments = async () => {
-    if (!currentUser) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setActionError(null);
     try {
-      const q = query(collection(db, 'documents'), where('ownerId', '==', currentUser.uid));
-      const snap = await getDocs(q);
-      const docs: AcademicDocument[] = [];
-      snap.forEach((d) => {
-        docs.push({
-          ...(d.data() as AcademicDocument),
-          documentId: d.id,
-        });
-      });
+      const docs = await fetchUserDocuments(activeUid);
       setDocuments(docs);
     } catch (err: any) {
       console.error('Error fetching academic documents:', err);
@@ -96,12 +93,17 @@ export const DocumentLibraryView: React.FC = () => {
 
   useEffect(() => {
     fetchDocuments();
-  }, [currentUser]);
+  }, [userProfile?.uid, currentUser?.uid]);
 
   // Handle Document Upload
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || isUploading) return;
+    if (isUploading) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) {
+      setActionError('You must be signed in to upload documents.');
+      return;
+    }
 
     if (!uploadTitle.trim()) {
       setActionError('Document title is required.');
@@ -127,7 +129,7 @@ export const DocumentLibraryView: React.FC = () => {
     try {
       const safeFileName = selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
       const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const storagePath = `users/${currentUser.uid}/documents/${docId}/${safeFileName}`;
+      const storagePath = `users/${activeUid}/documents/${docId}/${safeFileName}`;
 
       // Convert small file to Data URL for reliable in-browser storage & direct preview/download
       const reader = new FileReader();
@@ -141,7 +143,7 @@ export const DocumentLibraryView: React.FC = () => {
       setUploadStatus('Saving metadata to academic database...');
 
       const newDocData: Omit<AcademicDocument, 'documentId'> = {
-        ownerId: currentUser.uid,
+        ownerId: activeUid,
         title: uploadTitle.trim(),
         originalFileName: selectedFile.name,
         storagePath,

@@ -2,117 +2,35 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper function to check if user is signed in
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    
-    // Helper to check if user is operating on their own record
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    // User profiles: public read or owner read, owner write only for their own document
-    // Prevent modifying role and accountStatus unless existing admin
+    // User Profile Documents
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isOwner(userId) && 
-        (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role == 'student') &&
-        (!request.resource.data.keys().hasAny(['accountStatus']) || request.resource.data.accountStatus == 'ACTIVE');
-      allow update: if isOwner(userId) && 
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'accountStatus', 'uid', 'email']));
-      allow delete: if false;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // When creating account, role must be 'student'
+      allow create: if request.auth != null && request.auth.uid == userId 
+                    && (!('role' in request.resource.data) || request.resource.data.role == 'student');
+      // When updating account, user cannot self-escalate their role to admin
+      allow update: if request.auth != null && request.auth.uid == userId 
+                    && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role);
+      allow delete: if request.auth != null && request.auth.uid == userId;
 
-      // Personal Timetable subcollection: users/{userId}/timetable/{eventId}
-      match /timetable/{eventId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /assignments/{assignmentId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /documents/{documentId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /notes/{noteId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /revision/{revisionId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /calendar/{eventId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /exams/{examId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /knowledge/{entryId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /goals/{goalId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /notifications/{notificationId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /studySessions/{sessionId} {
-        allow read, write: if isOwner(userId);
-      }
-      match /{subcollection}/{docId} {
-        allow read, write: if isOwner(userId);
+      // All private subcollections under users/{userId} (timetable, notes, documents, etc.)
+      match /{allSubcollections=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
 
-    // Unique Username Registry
+    // Unique Usernames Directory
     match /usernames/{username} {
       allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if false;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
-    // Academic Documents
-    match /documents/{documentId} {
-      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-    }
-
-    // Academic Classes & Timetable & Notes
-    match /classes/{classId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-    
-    match /notes/{noteId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    match /assignments/{assignmentId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    // Academic Goals
-    match /goals/{goalId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    // Focus Sessions Log
-    match /focus_sessions/{sessionId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    // Academic Timetable
-    match /timetable/{slotId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    // Academic Exams
-    match /exams/{examId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-    }
-
-    // Academic Notifications & Reminders
-    match /notifications/{notificationId} {
-      allow read, write: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+    // Personal Academic Root Collections (partitioned by ownerId == request.auth.uid)
+    match /{collectionName}/{docId} {
+      allow read: if request.auth != null && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
   }
 }

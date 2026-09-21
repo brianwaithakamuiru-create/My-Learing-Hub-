@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
 import {
   AcademicDocument,
   AcademicClass,
@@ -9,13 +7,16 @@ import {
   AcademicNote,
   AcademicGoal,
   TimetableEvent,
+  AcademicExam,
 } from '../types';
 import {
+  fetchUserDocuments,
   fetchUserClasses,
   fetchUserAssignments,
   fetchUserNotes,
   fetchUserGoals,
   fetchUserFocusSessions,
+  fetchUserExams,
   createUserClass,
   createUserAssignment,
   createUserNote,
@@ -50,7 +51,7 @@ interface DashboardProps {
 }
 
 export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
 
   // Real Firestore workplace data states
   const [documents, setDocuments] = useState<AcademicDocument[]>([]);
@@ -59,9 +60,17 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [notes, setNotes] = useState<AcademicNote[]>([]);
   const [goals, setGoals] = useState<AcademicGoal[]>([]);
   const [timetable, setTimetable] = useState<TimetableEvent[]>([]);
+  const [exams, setExams] = useState<AcademicExam[]>([]);
   const [focusMinutes, setFocusMinutes] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
+  // Live ticking clock for student hub
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Quick Action Modal States
   const [activeModal, setActiveModal] = useState<
@@ -107,23 +116,23 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
     hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
 
   const loadAllWorkplaceData = async () => {
-    if (!userProfile?.uid) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) {
+      setLoading(false);
+      return;
+    }
     try {
-      const [docSnap, cls, asg, nts, gls, fcs, tt] = await Promise.all([
-        getDocs(query(collection(db, 'documents'), where('ownerId', '==', userProfile.uid))),
-        fetchUserClasses(userProfile.uid),
-        fetchUserAssignments(userProfile.uid),
-        fetchUserNotes(userProfile.uid),
-        fetchUserGoals(userProfile.uid),
-        fetchUserFocusSessions(userProfile.uid),
-        fetchUserTimetable(userProfile.uid),
+      setLoading(true);
+      const [docList, cls, asg, nts, gls, fcs, tt, exms] = await Promise.all([
+        fetchUserDocuments(activeUid),
+        fetchUserClasses(activeUid),
+        fetchUserAssignments(activeUid),
+        fetchUserNotes(activeUid),
+        fetchUserGoals(activeUid),
+        fetchUserFocusSessions(activeUid),
+        fetchUserTimetable(activeUid),
+        fetchUserExams(activeUid),
       ]);
-
-      const docList: AcademicDocument[] = [];
-      docSnap.forEach((d) => {
-        docList.push({ ...(d.data() as AcademicDocument), documentId: d.id });
-      });
-      docList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       setDocuments(docList);
       setClasses(cls);
@@ -131,11 +140,12 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
       setNotes(nts);
       setGoals(gls);
       setTimetable(tt);
+      setExams(exms);
 
       const totalMins = fcs.reduce((acc, curr) => acc + (curr.durationMinutes || 0), 0);
       setFocusMinutes(totalMins);
     } catch (err) {
-      console.error('Error loading workplace data:', err);
+      console.warn('Notice loading workplace data:', err);
     } finally {
       setLoading(false);
     }
@@ -143,16 +153,17 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     loadAllWorkplaceData();
-  }, [userProfile]);
+  }, [currentUser?.uid, userProfile?.uid]);
 
   // Seed sample starter set into real Firestore documents on request
   const handleSeedStarterAcademicSet = async () => {
-    if (!userProfile?.uid) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid) return;
     setLoading(true);
     try {
       // Add standard classes
       await Promise.all([
-        createUserClass(userProfile.uid, {
+        createUserClass(activeUid, {
           code: 'CS 301',
           name: 'Distributed Systems & Cloud Architecture',
           instructor: 'Prof. Julian Vance',
@@ -161,7 +172,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
           semester: 'Fall 2026',
           color: 'border-cyan-400',
         }),
-        createUserClass(userProfile.uid, {
+        createUserClass(activeUid, {
           code: 'MATH 204',
           name: 'Advanced Probability & Mathematical Statistics',
           instructor: 'Dr. Sarah Patel',
@@ -178,14 +189,14 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
       const inSevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       await Promise.all([
-        createUserAssignment(userProfile.uid, {
+        createUserAssignment(activeUid, {
           title: 'Distributed Key-Value Store Implementation',
           course: 'CS 301',
           dueDate: inThreeDays,
           status: 'In Progress',
           weight: '20% Final Grade',
         }),
-        createUserAssignment(userProfile.uid, {
+        createUserAssignment(activeUid, {
           title: 'Hypothesis Testing Problem Set 3',
           course: 'MATH 204',
           dueDate: inSevenDays,
@@ -195,7 +206,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
       ]);
 
       // Add starter notes & goals
-      await createUserNote(userProfile.uid, {
+      await createUserNote(activeUid, {
         title: 'Raft Consensus Algorithm & Quorums',
         course: 'CS 301',
         date: new Date().toISOString().split('T')[0],
@@ -203,7 +214,7 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
         tags: ['DistributedSystems', 'Consensus', 'Architecture'],
       });
 
-      await createUserGoal(userProfile.uid, {
+      await createUserGoal(activeUid, {
         title: 'Achieve First-Class Honors (GPA 3.8+)',
         target: '3.85 GPA',
         category: 'GPA',
@@ -257,9 +268,10 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
   // Submission handlers for Quick Modals
   const handleCreateAssignmentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userProfile?.uid || !newAssignment.title) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid || !newAssignment.title) return;
     try {
-      await createUserAssignment(userProfile.uid, {
+      await createUserAssignment(activeUid, {
         ...newAssignment,
         course: newAssignment.course || 'CS 301',
         dueDate: newAssignment.dueDate || new Date().toISOString().split('T')[0],
@@ -276,9 +288,10 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const handleCreateNoteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userProfile?.uid || !newNote.title) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid || !newNote.title) return;
     try {
-      await createUserNote(userProfile.uid, {
+      await createUserNote(activeUid, {
         title: newNote.title,
         course: newNote.course || 'General',
         date: new Date().toISOString().split('T')[0],
@@ -297,9 +310,10 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const handleCreateClassSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userProfile?.uid || !newClass.name) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid || !newClass.name) return;
     try {
-      await createUserClass(userProfile.uid, {
+      await createUserClass(activeUid, {
         ...newClass,
         code: newClass.code || 'COURSE 101',
       });
@@ -323,9 +337,10 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const handleCreateGoalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userProfile?.uid || !newGoal.title) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!activeUid || !newGoal.title) return;
     try {
-      await createUserGoal(userProfile.uid, {
+      await createUserGoal(activeUid, {
         title: newGoal.title,
         target: newGoal.target,
         category: newGoal.category,
@@ -345,76 +360,200 @@ export const DashboardView: React.FC<DashboardProps> = ({ onNavigate }) => {
   const pendingAssignments = assignments.filter((a) => a.status !== 'Submitted');
   const submittedCount = assignments.filter((a) => a.status === 'Submitted').length;
 
+  // Soonest upcoming assignment
+  const soonestAssignment = pendingAssignments.slice().sort((a, b) => {
+    return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+  })[0];
+
+  // Soonest upcoming exam
+  const soonestExam = exams.slice().sort((a, b) => {
+    return (
+      new Date(`${a.examDate}T${a.time || '00:00'}`).getTime() -
+      new Date(`${b.examDate}T${b.time || '00:00'}`).getTime()
+    );
+  })[0];
+
   return (
     <div className="space-y-6">
-      {/* 1. Academic Command Center Header */}
-      <div className="glass-panel rounded-2xl p-6 sm:p-8 border border-white/10 relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      {/* 1. Academic Command Center Header & Live Clock / Semester Bar */}
+      <div className="glass-panel rounded-2xl p-6 sm:p-8 border border-white/10 relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
           <div>
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span>Academic Command Center • {userProfile?.role || 'student'}</span>
+            <div className="flex flex-wrap items-center gap-2 mb-2.5">
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 text-[11px] font-bold uppercase tracking-wider">
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>MY LEARNING HUB</span>
+              </span>
+              <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium font-mono">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>{userProfile?.currentSemester || 'Trimester 2 - 2026'}</span>
+              </span>
+              <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-slate-900 border border-white/10 text-slate-300 text-[11px] font-mono">
+                <GraduationCap className="w-3 h-3 text-cyan-400" />
+                <span>{userProfile?.academicYear || 'Year 3 (2026/2027)'}</span>
+              </span>
             </div>
+
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white font-heading">
-              {greeting}, {userProfile?.fullName || 'Scholar'}!
+              {greeting}, {userProfile?.fullName || 'Brian Waithaka Muiru'}!
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl">
-              Your personalized academic workplace is active and fully synchronized with Cloud Firestore.
+              Welcome to your personal academic workstation. Timetable, deliverables, course documents, and revision notes are loaded and ready.
             </p>
           </div>
 
-          {/* Quick Action Navigation Bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              id="workplace-timetable-btn"
-              type="button"
-              onClick={() => onNavigate('/timetable')}
-              className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-cyan-400/30 text-cyan-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
-            >
-              <CalendarDays className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Timetable ({timetable.length})</span>
-            </button>
-
-            <button
-              id="workplace-new-note-btn"
-              type="button"
-              onClick={() => setActiveModal('note')}
-              className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
-            >
-              <Plus className="w-3.5 h-3.5 text-cyan-400" />
-              <span>New Note</span>
-            </button>
-
-            <button
-              id="workplace-new-assignment-btn"
-              type="button"
-              onClick={() => setActiveModal('assignment')}
-              className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
-            >
-              <Plus className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Add Assignment</span>
-            </button>
-
-            <button
-              id="workplace-focus-btn"
-              type="button"
-              onClick={() => onNavigate('/focus-mode')}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 text-slate-950 text-xs font-bold flex items-center space-x-1.5 shadow-[0_0_15px_rgba(34,211,238,0.3)] cursor-pointer transition-all"
-            >
-              <Flame className="w-3.5 h-3.5" />
-              <span>Focus Sanctuary</span>
-            </button>
-
-            <button
-              id="workplace-upload-doc-btn"
-              type="button"
-              onClick={() => onNavigate('/documents')}
-              className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
-            >
-              <FolderArchive className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Documents ({documents.length})</span>
-            </button>
+          {/* Live Date & Time HUD */}
+          <div className="flex flex-col sm:flex-row lg:flex-col items-start lg:items-end gap-2 bg-slate-950/80 p-3.5 rounded-2xl border border-white/10 shadow-inner">
+            <div className="flex items-center space-x-2 text-cyan-400 font-mono text-lg font-bold">
+              <Clock className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>
+                {currentTime.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 font-medium flex items-center space-x-1.5">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <span>
+                {currentTime.toLocaleDateString(undefined, {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </span>
+            </div>
           </div>
+        </div>
+
+        {/* Quick Action Navigation Bar */}
+        <div className="flex flex-wrap items-center gap-2 pt-6 border-t border-white/10 mt-6 relative z-10">
+          <button
+            id="workplace-timetable-btn"
+            type="button"
+            onClick={() => onNavigate('/timetable')}
+            className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-cyan-400/30 text-cyan-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
+          >
+            <CalendarDays className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Timetable ({timetable.length})</span>
+          </button>
+
+          <button
+            id="workplace-new-assignment-btn"
+            type="button"
+            onClick={() => setActiveModal('assignment')}
+            className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
+          >
+            <Plus className="w-3.5 h-3.5 text-indigo-400" />
+            <span>+ Assignment</span>
+          </button>
+
+          <button
+            id="workplace-new-note-btn"
+            type="button"
+            onClick={() => setActiveModal('note')}
+            className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
+          >
+            <Plus className="w-3.5 h-3.5 text-cyan-400" />
+            <span>+ Note</span>
+          </button>
+
+          <button
+            id="workplace-upload-doc-btn"
+            type="button"
+            onClick={() => onNavigate('/documents')}
+            className="px-3.5 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
+          >
+            <FolderArchive className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Documents ({documents.length})</span>
+          </button>
+
+          <button
+            id="workplace-ai-study-btn"
+            type="button"
+            onClick={() => onNavigate('/ai-study')}
+            className="px-3.5 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-400/30 text-cyan-300 text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>AI Study</span>
+          </button>
+
+          <button
+            id="workplace-focus-btn"
+            type="button"
+            onClick={() => onNavigate('/focus-mode')}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 text-xs font-bold flex items-center space-x-1.5 shadow-[0_0_15px_rgba(245,158,11,0.3)] cursor-pointer transition-all ml-auto"
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span>Focus Sanctuary</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Immediate Academic Alerts Ribbon: Upcoming Assignment + Upcoming Exam */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Upcoming Assignment Alert */}
+        <div
+          onClick={() => onNavigate('/assignments')}
+          className="glass-panel p-4 rounded-2xl border border-cyan-500/20 hover:border-cyan-400/50 transition-all cursor-pointer flex items-center justify-between group"
+        >
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 shrink-0">
+              <ClipboardList className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] text-cyan-400 uppercase font-semibold tracking-wider block">
+                Next Upcoming Assignment
+              </span>
+              {soonestAssignment ? (
+                <div>
+                  <h4 className="text-xs font-bold text-white truncate max-w-[240px] group-hover:text-cyan-300 transition-colors">
+                    {soonestAssignment.title}
+                  </h4>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {soonestAssignment.course} • Due {soonestAssignment.dueDate}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-400">All current assignments submitted!</span>
+              )}
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-300 transition-transform group-hover:translate-x-0.5" />
+        </div>
+
+        {/* Upcoming Exam Alert */}
+        <div
+          onClick={() => onNavigate('/exams')}
+          className="glass-panel p-4 rounded-2xl border border-indigo-500/20 hover:border-indigo-400/50 transition-all cursor-pointer flex items-center justify-between group"
+        >
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/15 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0">
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] text-indigo-400 uppercase font-semibold tracking-wider block">
+                Next Upcoming Exam
+              </span>
+              {soonestExam ? (
+                <div>
+                  <h4 className="text-xs font-bold text-white truncate max-w-[240px] group-hover:text-indigo-300 transition-colors">
+                    {soonestExam.title || soonestExam.courseCode}
+                  </h4>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {soonestExam.courseCode} • {soonestExam.examDate} ({soonestExam.time || 'TBA'})
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-400">No exams currently scheduled →</span>
+              )}
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-300 transition-transform group-hover:translate-x-0.5" />
         </div>
       </div>
 

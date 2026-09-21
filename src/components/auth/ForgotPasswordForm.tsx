@@ -1,23 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth, mapFirebaseAuthError } from '../../context/AuthContext';
 import { Mail, ArrowLeft, Loader2, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
 
 interface ForgotPasswordProps {
-  onBackToLogin: () => void;
+  initialEmail?: string;
+  onBackToLogin: (email?: string) => void;
 }
 
-export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBackToLogin }) => {
+export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({
+  initialEmail = '',
+  onBackToLogin,
+}) => {
   const { resetPassword } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    if (initialEmail && !email) {
+      setEmail(initialEmail);
+    }
+  }, [initialEmail]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMessage('Please enter a valid email address.');
       return;
@@ -30,10 +40,9 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBackToLogi
       await resetPassword(cleanEmail);
       setIsSuccess(true);
     } catch (err: any) {
-      console.error('Password reset failed:', err);
-      // For security, don't reveal exact user existence, but handle network/invalid errors
+      // For security and privacy, don't reveal exact user existence, but handle network/invalid errors
       const friendly = mapFirebaseAuthError(err);
-      if (err?.code === 'auth/user-not-found') {
+      if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
         // Obfuscate user presence for account privacy
         setIsSuccess(true);
       } else {
@@ -50,7 +59,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBackToLogi
         <button
           type="button"
           id="forgot-password-back-btn"
-          onClick={onBackToLogin}
+          onClick={() => onBackToLogin(email.trim().toLowerCase())}
           className="inline-flex items-center text-xs text-slate-400 hover:text-cyan-400 mb-4 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5 mr-1" />
@@ -84,7 +93,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBackToLogi
             <button
               type="button"
               id="forgot-password-return-login-btn"
-              onClick={onBackToLogin}
+              onClick={() => onBackToLogin(email.trim().toLowerCase())}
               className="mt-3 w-full py-2.5 px-4 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 text-xs font-semibold rounded-xl transition-all cursor-pointer"
             >
               Return to Sign In

@@ -5,11 +5,17 @@ export interface UserProfile {
   username: string;
   normalizedUsername: string;
   country: string;
+  academicYear?: string;
+  currentSemester?: string;
+  semester?: string;
   role: 'student' | 'researcher' | 'admin';
   accountStatus: 'ACTIVE' | 'DISABLED' | 'PENDING';
+  emailVerified?: boolean;
+  photoURL?: string;
   avatarUrl?: string;
   createdAt: string;
   updatedAt: string;
+  lastLoginAt?: string;
   preferences?: {
     overlayStrength?: number;
     backgroundBlur?: number;

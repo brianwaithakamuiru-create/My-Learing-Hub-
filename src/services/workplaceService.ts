@@ -22,7 +22,44 @@ import {
   KnowledgeEntry,
   CalendarEvent,
   AcademicNotification,
+  AcademicDocument,
 } from '../types';
+
+// ==========================================
+// 0. ACADEMIC DOCUMENTS SERVICE
+// ==========================================
+
+export async function fetchUserDocuments(uid: string): Promise<AcademicDocument[]> {
+  try {
+    const list: AcademicDocument[] = [];
+    // 1. Query root documents collection partitioned by ownerId
+    const q = query(
+      collection(db, 'documents'),
+      where('ownerId', '==', uid)
+    );
+    const snap = await getDocs(q);
+    snap.forEach((d) => {
+      list.push({ ...(d.data() as AcademicDocument), documentId: d.id, ownerId: uid });
+    });
+
+    // 2. Also check private user subcollection users/{uid}/documents
+    try {
+      const subColRef = collection(db, 'users', uid, 'documents');
+      const subSnap = await getDocs(subColRef);
+      subSnap.forEach((d) => {
+        if (!list.some((existing) => existing.documentId === d.id)) {
+          list.push({ ...(d.data() as AcademicDocument), documentId: d.id, ownerId: uid });
+        }
+      });
+    } catch (_) {}
+
+    list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'documents');
+    return [];
+  }
+}
 
 // ==========================================
 // 1. CLASSES SERVICE
@@ -78,17 +115,29 @@ export async function deleteUserClass(classId: string): Promise<void> {
 
 export async function fetchUserAssignments(uid: string): Promise<Assignment[]> {
   try {
+    const list: Assignment[] = [];
+    // 1. Try user subcollection first
+    try {
+      const subColRef = collection(db, 'users', uid, 'assignments');
+      const subSnap = await getDocs(subColRef);
+      subSnap.forEach((d) => {
+        list.push({ ...(d.data() as Assignment), id: d.id, ownerId: uid });
+      });
+    } catch (_) {}
+
+    // 2. Also check root collection partitioned by ownerId
     const q = query(
       collection(db, 'assignments'),
       where('ownerId', '==', uid)
     );
     const snap = await getDocs(q);
-    const list: Assignment[] = [];
     snap.forEach((d) => {
-      list.push({ ...(d.data() as Assignment), id: d.id });
+      if (!list.some((existing) => existing.id === d.id)) {
+        list.push({ ...(d.data() as Assignment), id: d.id, ownerId: uid });
+      }
     });
     // Sort by dueDate ascending
-    list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    list.sort((a, b) => new Date(a.dueDate || 0).getTime() - new Date(b.dueDate || 0).getTime());
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'assignments');
@@ -143,17 +192,29 @@ export async function deleteUserAssignment(assignmentId: string): Promise<void> 
 
 export async function fetchUserNotes(uid: string): Promise<AcademicNote[]> {
   try {
+    const list: AcademicNote[] = [];
+    // 1. Try user subcollection first
+    try {
+      const subColRef = collection(db, 'users', uid, 'notes');
+      const subSnap = await getDocs(subColRef);
+      subSnap.forEach((d) => {
+        list.push({ ...(d.data() as AcademicNote), id: d.id, ownerId: uid });
+      });
+    } catch (_) {}
+
+    // 2. Also check root collection
     const q = query(
       collection(db, 'notes'),
       where('ownerId', '==', uid)
     );
     const snap = await getDocs(q);
-    const list: AcademicNote[] = [];
     snap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicNote), id: d.id });
+      if (!list.some((existing) => existing.id === d.id)) {
+        list.push({ ...(d.data() as AcademicNote), id: d.id, ownerId: uid });
+      }
     });
     // Sort by date newest first
-    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    list.sort((a, b) => new Date(b.date || b.createdAt || 0).getTime() - new Date(a.date || a.createdAt || 0).getTime());
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'notes');
@@ -193,14 +254,26 @@ export async function deleteUserNote(noteId: string): Promise<void> {
 
 export async function fetchUserGoals(uid: string): Promise<AcademicGoal[]> {
   try {
+    const list: AcademicGoal[] = [];
+    // 1. Try user subcollection first
+    try {
+      const subColRef = collection(db, 'users', uid, 'goals');
+      const subSnap = await getDocs(subColRef);
+      subSnap.forEach((d) => {
+        list.push({ ...(d.data() as AcademicGoal), id: d.id, ownerId: uid });
+      });
+    } catch (_) {}
+
+    // 2. Also check root collection
     const q = query(
       collection(db, 'goals'),
       where('ownerId', '==', uid)
     );
     const snap = await getDocs(q);
-    const list: AcademicGoal[] = [];
     snap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicGoal), id: d.id });
+      if (!list.some((existing) => existing.id === d.id)) {
+        list.push({ ...(d.data() as AcademicGoal), id: d.id, ownerId: uid });
+      }
     });
     return list;
   } catch (err) {

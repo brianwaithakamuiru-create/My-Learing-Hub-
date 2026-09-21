@@ -6,10 +6,9 @@ import {
   fetchUserExams,
   fetchUserKnowledgeItems,
   fetchUserRevisionTopics,
+  fetchUserDocuments,
 } from '../../services/workplaceService';
 import { fetchUserTimetable } from '../../services/timetableService';
-import { db } from '../../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
 import { AcademicDocument } from '../../types';
 import {
   Search,
@@ -36,7 +35,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   onClose,
   onNavigate,
 }) => {
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const [queryText, setQueryText] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -50,25 +49,21 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   const [revision, setRevision] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!isOpen || !userProfile?.uid) return;
+    const activeUid = currentUser?.uid || userProfile?.uid;
+    if (!isOpen || !activeUid) return;
 
     const loadIndex = async () => {
       setLoading(true);
       try {
-        const [tt, asg, nts, ex, kn, rev, docSnap] = await Promise.all([
-          fetchUserTimetable(userProfile.uid),
-          fetchUserAssignments(userProfile.uid),
-          fetchUserNotes(userProfile.uid),
-          fetchUserExams(userProfile.uid),
-          fetchUserKnowledgeItems(userProfile.uid),
-          fetchUserRevisionTopics(userProfile.uid),
-          getDocs(query(collection(db, 'documents'), where('ownerId', '==', userProfile.uid))),
+        const [tt, asg, nts, ex, kn, rev, docs] = await Promise.all([
+          fetchUserTimetable(activeUid),
+          fetchUserAssignments(activeUid),
+          fetchUserNotes(activeUid),
+          fetchUserExams(activeUid),
+          fetchUserKnowledgeItems(activeUid),
+          fetchUserRevisionTopics(activeUid),
+          fetchUserDocuments(activeUid),
         ]);
-
-        const docs: AcademicDocument[] = [];
-        docSnap.forEach((d) => {
-          docs.push({ ...(d.data() as AcademicDocument), documentId: d.id });
-        });
 
         setTimetable(tt);
         setAssignments(asg);
@@ -85,7 +80,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
     };
 
     loadIndex();
-  }, [isOpen, userProfile]);
+  }, [isOpen, currentUser?.uid, userProfile?.uid]);
 
   // Keyboard shortcut handler for Escape
   useEffect(() => {
