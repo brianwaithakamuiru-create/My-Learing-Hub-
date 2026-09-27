@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import {readCollection,writeCollection,makeId} from '../lib/localStore';
 import { TimetableEvent, TimetableDay } from '../types';
 
 export const DAY_ORDER: TimetableDay[] = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -13,38 +13,7 @@ export function formatMinutesToTime(minutes:number):string {
   return h.toString().padStart(2,'0')+':'+m.toString().padStart(2,'0');
 }
 
-export async function fetchUserTimetable(uid:string):Promise<TimetableEvent[]> {
-  const {data,error}=await supabase.from('academic_records').select('id,owner_id,data,created_at,updated_at')
-    .eq('owner_id',uid).eq('kind','timetable');
-  if(error){console.error('Failed to load timetable:',error);return[];}
-  const list=((data||[]) as any[]).map(row=>({...row.data,eventId:row.id,ownerId:row.owner_id,createdAt:row.data?.createdAt||row.created_at,updatedAt:row.data?.updatedAt||row.updated_at}));
-  list.sort((a,b)=>DAY_ORDER.indexOf(a.day)-DAY_ORDER.indexOf(b.day)||parseTimeToMinutes(a.startTime)-parseTimeToMinutes(b.startTime));
-  return list as TimetableEvent[];
-}
-
-export async function createTimetableClass(uid:string,eventData:Omit<TimetableEvent,'eventId'|'ownerId'|'createdAt'|'updatedAt'>):Promise<string>{
-  const now=new Date().toISOString();
-  const {data,error}=await supabase.from('academic_records').insert({
-    owner_id:uid,kind:'timetable',data:{...eventData,ownerId:uid,createdAt:now,updatedAt:now},created_at:now,updated_at:now
-  }).select('id').single();
-  if(error)throw error;
-  return data.id;
-}
-
-export async function updateTimetableClass(uid:string,eventId:string,eventData:Partial<TimetableEvent>):Promise<void>{
-  const {data:existing,error:readError}=await supabase.from('academic_records').select('data').eq('id',eventId).eq('owner_id',uid).single();
-  if(readError)throw readError;
-  const {_eId,_oId,eventId:_eventId,ownerId:_ownerId,...rest}=eventData as any;
-  const now=new Date().toISOString();
-  const {error}=await supabase.from('academic_records').update({data:{...(existing?.data||{}),...rest,updatedAt:now},updated_at:now}).eq('id',eventId).eq('owner_id',uid);
-  if(error)throw error;
-}
-
-export async function deleteTimetableClass(uid:string,eventId:string):Promise<void>{
-  const {error}=await supabase.from('academic_records').delete().eq('id',eventId).eq('owner_id',uid);
-  if(error)throw error;
-}
-
+export async function fetchUserTimetable(uid:string):Promise<TimetableEvent[]> {const list=readCollection<any>('timetable').filter(x=>x.ownerId===uid) as TimetableEvent[];list.sort((a,b)=>DAY_ORDER.indexOf(a.day)-DAY_ORDER.indexOf(b.day)||parseTimeToMinutes(a.startTime)-parseTimeToMinutes(b.startTime));return list;}\n\nexport async function createTimetableClass(uid:string,eventData:Omit<TimetableEvent,'eventId'|'ownerId'|'createdAt'|'updatedAt'>):Promise<string>{const now=new Date().toISOString();const id=makeId();const items=readCollection<any>('timetable');items.push({...eventData,eventId:id,ownerId:uid,createdAt:now,updatedAt:now});writeCollection('timetable',items);return id;}\n\nexport async function updateTimetableClass(uid:string,eventId:string,eventData:Partial<TimetableEvent>):Promise<void>{const items=readCollection<any>('timetable');const i=items.findIndex(x=>x.eventId===eventId&&x.ownerId===uid);if(i<0)return;const {_eId,_oId,eventId:_eventId,ownerId:_ownerId,...rest}=eventData as any;items[i]={...items[i],...rest,updatedAt:new Date().toISOString()};writeCollection('timetable',items);}\n\nexport async function deleteTimetableClass(uid:string,eventId:string):Promise<void>{writeCollection('timetable',readCollection<any>('timetable').filter(x=>!(x.eventId===eventId&&x.ownerId===uid)));}\n
 export function detectTimetableConflicts(existingClasses:TimetableEvent[],target:{day:TimetableDay;startTime:string;endTime:string},excludeEventId?:string):TimetableEvent[]{
   const targetStart=parseTimeToMinutes(target.startTime),targetEnd=parseTimeToMinutes(target.endTime);
   if(targetEnd<=targetStart)return[];
