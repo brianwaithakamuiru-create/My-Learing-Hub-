@@ -1,30 +1,10 @@
-import { supabase } from '../lib/supabase';
-import { AcademicClass, Assignment, AcademicNote, AcademicGoal, FocusSession, AcademicExam, RevisionTopic, KnowledgeEntry, CalendarEvent, AcademicNotification, AcademicDocument } from '../types';
-
-type RecordKind = 'document' | 'class' | 'assignment' | 'note' | 'goal' | 'focus_session' | 'exam' | 'knowledge' | 'revision' | 'calendar' | 'notification';
-type AcademicRecord = { id:string; owner_id:string; kind:RecordKind; data:Record<string,any>; created_at:string; updated_at:string };
-
-async function listRecords<T>(uid:string, kind:RecordKind):Promise<Array<T & {id:string;ownerId:string}>> {
-  const {data,error}=await supabase.from('academic_records').select('id, owner_id, kind, data, created_at, updated_at').eq('owner_id',uid).eq('kind',kind);
-  if(error) throw error;
-  return ((data||[]) as AcademicRecord[]).map(row=>({...row.data,id:row.id,ownerId:row.owner_id,createdAt:row.data?.createdAt||row.created_at,updatedAt:row.data?.updatedAt||row.updated_at})) as Array<T & {id:string;ownerId:string}>;
-}
-async function createRecord(uid:string,kind:RecordKind,payload:Record<string,any>):Promise<string>{
-  const now=new Date().toISOString();
-  const data={...payload,ownerId:uid,createdAt:payload.createdAt||now,updatedAt:payload.updatedAt||now};
-  const {data:row,error}=await supabase.from('academic_records').insert({owner_id:uid,kind,data,created_at:data.createdAt,updated_at:data.updatedAt}).select('id').single();
-  if(error) throw error; return row.id;
-}
-async function updateRecord(id:string,payload:Record<string,any>):Promise<void>{
-  const {data:existing,error:readError}=await supabase.from('academic_records').select('data').eq('id',id).single();
-  if(readError) throw readError;
-  const now=new Date().toISOString();
-  const nextData={...((existing?.data||{}) as Record<string,any>),...payload,updatedAt:now};
-  const {error}=await supabase.from('academic_records').update({data:nextData,updated_at:now}).eq('id',id);
-  if(error) throw error;
-}
-async function deleteRecord(id:string):Promise<void>{const {error}=await supabase.from('academic_records').delete().eq('id',id);if(error)throw error;}
-
+import {AcademicClass,Assignment,AcademicNote,AcademicGoal,FocusSession,AcademicExam,RevisionTopic,KnowledgeEntry,CalendarEvent,AcademicNotification,AcademicDocument} from '../types';
+import {readCollection,writeCollection,makeId,fileToDataUrl} from '../lib/localStore';
+type RecordKind='document'|'class'|'assignment'|'note'|'goal'|'focus_session'|'exam'|'knowledge'|'revision'|'calendar'|'notification';
+async function listRecords<T>(uid:string,kind:RecordKind):Promise<Array<T&{id:string;ownerId:string}>>{return readCollection<any>(kind).filter(x=>x.ownerId===uid);}
+async function createRecord(uid:string,kind:RecordKind,payload:Record<string,any>):Promise<string>{const now=new Date().toISOString();const id=makeId();const data={...payload,id,ownerId:uid,createdAt:payload.createdAt||now,updatedAt:payload.updatedAt||now};const items=readCollection<any>(kind);items.push(data);writeCollection(kind,items);return id;}
+async function updateRecord(id:string,payload:Record<string,any>):Promise<void>{for(const kind of ['document','class','assignment','note','goal','focus_session','exam','knowledge','revision','calendar','notification'] as RecordKind[]){const items=readCollection<any>(kind);const i=items.findIndex(x=>x.id===id);if(i>=0){items[i]={...items[i],...payload,updatedAt:new Date().toISOString()};writeCollection(kind,items);return;}}}
+async function deleteRecord(id:string):Promise<void>{for(const kind of ['document','class','assignment','note','goal','focus_session','exam','knowledge','revision','calendar','notification'] as RecordKind[]){const items=readCollection<any>(kind);const next=items.filter(x=>x.id!==id);if(next.length!==items.length){writeCollection(kind,next);return;}}}
 export async function fetchUserDocuments(uid:string):Promise<AcademicDocument[]>{try{const list=await listRecords<AcademicDocument>(uid,'document');return list.sort((a,b)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());}catch(e){console.error(e);return[];}}
 export async function fetchUserClasses(uid:string):Promise<AcademicClass[]>{try{return await listRecords<AcademicClass>(uid,'class');}catch(e){console.error(e);return[];}}
 export async function createUserClass(uid:string,classData:Omit<AcademicClass,'id'>):Promise<string>{return createRecord(uid,'class',classData as Record<string,any>);}
