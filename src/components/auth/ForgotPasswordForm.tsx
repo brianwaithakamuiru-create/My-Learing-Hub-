@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth, mapFirebaseAuthError } from '../../context/AuthContext';
+import { useAuth, mapSupabaseAuthError } from '../../context/AuthContext';
 import { Mail, ArrowLeft, Loader2, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
 
 interface ForgotPasswordProps {
@@ -41,7 +41,7 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({
       setIsSuccess(true);
     } catch (err: any) {
       // For security and privacy, don't reveal exact user existence, but handle network/invalid errors
-      const friendly = mapFirebaseAuthError(err);
+      const friendly = mapSupabaseAuthError(err);
       if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
         // Obfuscate user presence for account privacy
         setIsSuccess(true);
