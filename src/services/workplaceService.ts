@@ -52,15 +52,7 @@ export async function markNotificationAsRead(_uid:string,notifId:string):Promise
 export async function markAllNotificationsAsRead(uid:string,notifications?:AcademicNotification[]):Promise<void>{const list=notifications||(await fetchUserNotifications(uid));await Promise.all(list.filter(n=>!n.read).map(n=>updateRecord(n.id,{read:true})));}
 export async function deleteNotification(_uid:string,notifId:string):Promise<void>{return deleteRecord(notifId);}
 
-export async function uploadAcademicDocument(uid:string,file:File,metadata:Omit<AcademicDocument,'documentId'|'ownerId'|'storagePath'|'downloadUrl'|'createdAt'|'updatedAt'>):Promise<string>{
-  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-  const storagePath=uid+'/'+crypto.randomUUID()+'-'+safeName;
-  const {error:uploadError}=await supabase.storage.from('academic-documents').upload(storagePath,file,{upsert:false,contentType:file.type||undefined});
-  if(uploadError)throw uploadError;
-  const {data:publicUrl}=supabase.storage.from('academic-documents').getPublicUrl(storagePath);
-  return createRecord(uid,'document',{...metadata,storagePath,downloadUrl:publicUrl.publicUrl,originalFileName:file.name,fileType:file.name.split('.').pop()?.toLowerCase()||'',mimeType:file.type||'application/octet-stream',fileSize:file.size});
-}
-
+export async function uploadAcademicDocument(uid:string,file:File,metadata:Omit<AcademicDocument,'documentId'|'ownerId'|'storagePath'|'downloadUrl'|'createdAt'|'updatedAt'>):Promise<string>{const dataUrl=await fileToDataUrl(file);return createRecord(uid,'document',{...metadata,documentId:makeId(),storagePath:'local',downloadUrl:dataUrl,originalFileName:file.name,fileType:file.name.split('.').pop()?.toLowerCase()||'',mimeType:file.type||'application/octet-stream',fileSize:file.size});}
 export const createAcademicExam=createUserExam;
 export const updateAcademicExam=updateUserExam;
 export const deleteAcademicExam=deleteUserExam;
