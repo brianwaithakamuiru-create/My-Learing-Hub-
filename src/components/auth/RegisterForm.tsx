@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth, mapFirebaseAuthError } from '../../context/AuthContext';
+import { useAuth, mapSupabaseAuthError } from '../../context/AuthContext';
 import {
   User,
   Mail,
@@ -167,7 +167,7 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      // Execute REAL Firebase Registration + Firestore creation + Transactional Username Claim
+      // Execute REAL Supabase Registration + Firestore creation + Transactional Username Claim
       const profile = await registerUser({
         fullName: fullName.trim(),
         username: username.trim(),
@@ -199,7 +199,7 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({
       ) {
         fieldErrors.username = 'Username already taken. Please choose another username.';
       } else {
-        fieldErrors.general = mapFirebaseAuthError(err);
+        fieldErrors.general = mapSupabaseAuthError(err);
       }
 
       setErrors(fieldErrors);
