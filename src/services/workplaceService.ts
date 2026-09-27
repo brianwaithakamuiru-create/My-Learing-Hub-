@@ -1,711 +1,92 @@
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
-  orderBy,
-  limit,
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import {
-  AcademicClass,
-  Assignment,
-  AcademicNote,
-  AcademicGoal,
-  FocusSession,
-  AcademicExam,
-  RevisionTopic,
-  KnowledgeEntry,
-  CalendarEvent,
-  AcademicNotification,
-  AcademicDocument,
-} from '../types';
+import { supabase } from '../lib/supabase';
+import { AcademicClass, Assignment, AcademicNote, AcademicGoal, FocusSession, AcademicExam, RevisionTopic, KnowledgeEntry, CalendarEvent, AcademicNotification, AcademicDocument } from '../types';
 
-// ==========================================
-// 0. ACADEMIC DOCUMENTS SERVICE
-// ==========================================
+type RecordKind = 'document' | 'class' | 'assignment' | 'note' | 'goal' | 'focus_session' | 'exam' | 'knowledge' | 'revision' | 'calendar' | 'notification';
+type AcademicRecord = { id:string; owner_id:string; kind:RecordKind; data:Record<string,any>; created_at:string; updated_at:string };
 
-export async function fetchUserDocuments(uid: string): Promise<AcademicDocument[]> {
-  try {
-    const list: AcademicDocument[] = [];
-    // 1. Query root documents collection partitioned by ownerId
-    const q = query(
-      collection(db, 'documents'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicDocument), documentId: d.id, ownerId: uid });
-    });
+async function listRecords<T>(uid:string, kind:RecordKind):Promise<Array<T & {id:string;ownerId:string}>> {
+  const {data,error}=await supabase.from('academic_records').select('id, owner_id, kind, data, created_at, updated_at').eq('owner_id',uid).eq('kind',kind);
+  if(error) throw error;
+  return ((data||[]) as AcademicRecord[]).map(row=>({...row.data,id:row.id,ownerId:row.owner_id,createdAt:row.data?.createdAt||row.created_at,updatedAt:row.data?.updatedAt||row.updated_at})) as Array<T & {id:string;ownerId:string}>;
+}
+async function createRecord(uid:string,kind:RecordKind,payload:Record<string,any>):Promise<string>{
+  const now=new Date().toISOString();
+  const data={...payload,ownerId:uid,createdAt:payload.createdAt||now,updatedAt:payload.updatedAt||now};
+  const {data:row,error}=await supabase.from('academic_records').insert({owner_id:uid,kind,data,created_at:data.createdAt,updated_at:data.updatedAt}).select('id').single();
+  if(error) throw error; return row.id;
+}
+async function updateRecord(id:string,payload:Record<string,any>):Promise<void>{
+  const {data:existing,error:readError}=await supabase.from('academic_records').select('data').eq('id',id).single();
+  if(readError) throw readError;
+  const now=new Date().toISOString();
+  const nextData={...((existing?.data||{}) as Record<string,any>),...payload,updatedAt:now};
+  const {error}=await supabase.from('academic_records').update({data:nextData,updated_at:now}).eq('id',id);
+  if(error) throw error;
+}
+async function deleteRecord(id:string):Promise<void>{const {error}=await supabase.from('academic_records').delete().eq('id',id);if(error)throw error;}
 
-    // 2. Also check private user subcollection users/{uid}/documents
-    try {
-      const subColRef = collection(db, 'users', uid, 'documents');
-      const subSnap = await getDocs(subColRef);
-      subSnap.forEach((d) => {
-        if (!list.some((existing) => existing.documentId === d.id)) {
-          list.push({ ...(d.data() as AcademicDocument), documentId: d.id, ownerId: uid });
-        }
-      });
-    } catch (_) {}
+export async function fetchUserDocuments(uid:string):Promise<AcademicDocument[]>{try{const list=await listRecords<AcademicDocument>(uid,'document');return list.sort((a,b)=>new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());}catch(e){console.error(e);return[];}}
+export async function fetchUserClasses(uid:string):Promise<AcademicClass[]>{try{return await listRecords<AcademicClass>(uid,'class');}catch(e){console.error(e);return[];}}
+export async function createUserClass(uid:string,classData:Omit<AcademicClass,'id'>):Promise<string>{return createRecord(uid,'class',classData as Record<string,any>);}
+export async function deleteUserClass(classId:string):Promise<void>{return deleteRecord(classId);}
 
-    list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'documents');
-    return [];
-  }
+export async function fetchUserAssignments(uid:string):Promise<Assignment[]>{try{const list=await listRecords<Assignment>(uid,'assignment');return list.sort((a,b)=>new Date(a.dueDate||0).getTime()-new Date(b.dueDate||0).getTime());}catch(e){console.error(e);return[];}}
+export async function createUserAssignment(uid:string,data:Omit<Assignment,'id'>):Promise<string>{return createRecord(uid,'assignment',data as Record<string,any>);}
+export async function updateUserAssignmentStatus(assignmentId:string,status:'Pending'|'In Progress'|'Submitted'):Promise<void>{return updateRecord(assignmentId,{status});}
+export async function deleteUserAssignment(assignmentId:string):Promise<void>{return deleteRecord(assignmentId);}
+
+export async function fetchUserNotes(uid:string):Promise<AcademicNote[]>{try{const list=await listRecords<AcademicNote>(uid,'note');return list.sort((a,b)=>new Date(b.date||b.createdAt||0).getTime()-new Date(a.date||a.createdAt||0).getTime());}catch(e){console.error(e);return[];}}
+export async function createUserNote(uid:string,data:Omit<AcademicNote,'id'>):Promise<string>{return createRecord(uid,'note',data as Record<string,any>);}
+export async function deleteUserNote(noteId:string):Promise<void>{return deleteRecord(noteId);}
+
+export async function fetchUserGoals(uid:string):Promise<AcademicGoal[]>{try{return await listRecords<AcademicGoal>(uid,'goal');}catch(e){console.error(e);return[];}}
+export async function createUserGoal(uid:string,data:Omit<AcademicGoal,'id'|'createdAt'|'ownerId'>):Promise<string>{return createRecord(uid,'goal',data as Record<string,any>);}
+export async function updateGoalProgress(goalId:string,progress:number,completed:boolean):Promise<void>{return updateRecord(goalId,{progress:Math.min(100,Math.max(0,progress)),completed});}
+export async function deleteUserGoal(goalId:string):Promise<void>{return deleteRecord(goalId);}
+
+export async function fetchUserFocusSessions(uid:string):Promise<FocusSession[]>{try{const list=await listRecords<FocusSession>(uid,'focus_session');return list.sort((a,b)=>new Date(b.completedAt).getTime()-new Date(a.completedAt).getTime());}catch(e){console.error(e);return[];}}
+export async function logFocusSession(uid:string,data:Omit<FocusSession,'id'|'ownerId'>):Promise<string>{return createRecord(uid,'focus_session',data as Record<string,any>);}
+
+export async function fetchUserExams(uid:string):Promise<AcademicExam[]>{try{const list=await listRecords<AcademicExam>(uid,'exam');return list.sort((a,b)=>new Date((a.examDate||'')+'T'+(a.time||'00:00')).getTime()-new Date((b.examDate||'')+'T'+(b.time||'00:00')).getTime());}catch(e){console.error(e);return[];}}
+export async function createUserExam(uid:string,data:Omit<AcademicExam,'id'|'ownerId'>):Promise<string>{return createRecord(uid,'exam',data as Record<string,any>);}
+export async function updateUserExam(_uid:string,examId:string,data:Partial<AcademicExam>):Promise<void>{return updateRecord(examId,data as Record<string,any>);}
+export async function deleteUserExam(_uid:string,examId:string):Promise<void>{return deleteRecord(examId);}
+
+export async function fetchUserKnowledgeEntries(uid:string):Promise<KnowledgeEntry[]>{try{const list=await listRecords<KnowledgeEntry>(uid,'knowledge');return list.sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime());}catch(e){console.error(e);return[];}}
+export async function createKnowledgeEntry(uid:string,data:Omit<KnowledgeEntry,'id'|'ownerId'|'createdAt'>):Promise<string>{return createRecord(uid,'knowledge',data as Record<string,any>);}
+export async function updateKnowledgeEntry(_uid:string,entryId:string,data:Partial<KnowledgeEntry>):Promise<void>{return updateRecord(entryId,data as Record<string,any>);}
+export async function deleteKnowledgeEntry(_uid:string,entryId:string):Promise<void>{return deleteRecord(entryId);}
+
+export async function fetchUserRevisionTopics(uid:string):Promise<RevisionTopic[]>{try{return await listRecords<RevisionTopic>(uid,'revision');}catch(e){console.error(e);return[];}}
+export async function createRevisionTopic(uid:string,data:Omit<RevisionTopic,'id'|'ownerId'>):Promise<string>{return createRecord(uid,'revision',data as Record<string,any>);}
+export async function updateRevisionTopic(_uid:string,topicId:string,data:Partial<RevisionTopic>):Promise<void>{return updateRecord(topicId,{...(data as Record<string,any>),lastRevisedAt:new Date().toISOString()});}
+export async function deleteRevisionTopic(_uid:string,topicId:string):Promise<void>{return deleteRecord(topicId);}
+
+export async function fetchUserCalendarEvents(uid:string):Promise<CalendarEvent[]>{try{const list=await listRecords<CalendarEvent>(uid,'calendar');return list.sort((a,b)=>new Date(a.date).getTime()-new Date(b.date).getTime());}catch(e){console.error(e);return[];}}
+export async function createCalendarEvent(uid:string,data:Omit<CalendarEvent,'id'|'ownerId'>):Promise<string>{return createRecord(uid,'calendar',data as Record<string,any>);}
+export async function deleteCalendarEvent(_uid:string,eventId:string):Promise<void>{return deleteRecord(eventId);}
+
+export async function fetchUserNotifications(uid:string):Promise<AcademicNotification[]>{try{const list=await listRecords<AcademicNotification>(uid,'notification');return list.sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime());}catch(e){console.error(e);return[];}}
+export async function createNotification(uid:string,data:Omit<AcademicNotification,'id'|'ownerId'|'createdAt'>):Promise<string>{return createRecord(uid,'notification',data as Record<string,any>);}
+export async function markNotificationAsRead(_uid:string,notifId:string):Promise<void>{return updateRecord(notifId,{read:true});}
+export async function markAllNotificationsAsRead(uid:string,notifications?:AcademicNotification[]):Promise<void>{const list=notifications||(await fetchUserNotifications(uid));await Promise.all(list.filter(n=>!n.read).map(n=>updateRecord(n.id,{read:true})));}
+export async function deleteNotification(_uid:string,notifId:string):Promise<void>{return deleteRecord(notifId);}
+
+export async function uploadAcademicDocument(uid:string,file:File,metadata:Omit<AcademicDocument,'documentId'|'ownerId'|'storagePath'|'downloadUrl'|'createdAt'|'updatedAt'>):Promise<string>{
+  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const storagePath=uid+'/'+crypto.randomUUID()+'-'+safeName;
+  const {error:uploadError}=await supabase.storage.from('academic-documents').upload(storagePath,file,{upsert:false,contentType:file.type||undefined});
+  if(uploadError)throw uploadError;
+  const {data:publicUrl}=supabase.storage.from('academic-documents').getPublicUrl(storagePath);
+  return createRecord(uid,'document',{...metadata,storagePath,downloadUrl:publicUrl.publicUrl,originalFileName:file.name,fileType:file.name.split('.').pop()?.toLowerCase()||'',mimeType:file.type||'application/octet-stream',fileSize:file.size});
 }
 
-// ==========================================
-// 1. CLASSES SERVICE
-// ==========================================
-
-export async function fetchUserClasses(uid: string): Promise<AcademicClass[]> {
-  try {
-    const q = query(
-      collection(db, 'classes'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    const list: AcademicClass[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicClass), id: d.id });
-    });
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'classes');
-    return [];
-  }
-}
-
-export async function createUserClass(
-  uid: string,
-  classData: Omit<AcademicClass, 'id'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'classes'), {
-      ...classData,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, 'classes');
-    throw err;
-  }
-}
-
-export async function deleteUserClass(classId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'classes', classId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `classes/${classId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 2. ASSIGNMENTS SERVICE
-// ==========================================
-
-export async function fetchUserAssignments(uid: string): Promise<Assignment[]> {
-  try {
-    const list: Assignment[] = [];
-    // 1. Try user subcollection first
-    try {
-      const subColRef = collection(db, 'users', uid, 'assignments');
-      const subSnap = await getDocs(subColRef);
-      subSnap.forEach((d) => {
-        list.push({ ...(d.data() as Assignment), id: d.id, ownerId: uid });
-      });
-    } catch (_) {}
-
-    // 2. Also check root collection partitioned by ownerId
-    const q = query(
-      collection(db, 'assignments'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      if (!list.some((existing) => existing.id === d.id)) {
-        list.push({ ...(d.data() as Assignment), id: d.id, ownerId: uid });
-      }
-    });
-    // Sort by dueDate ascending
-    list.sort((a, b) => new Date(a.dueDate || 0).getTime() - new Date(b.dueDate || 0).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'assignments');
-    return [];
-  }
-}
-
-export async function createUserAssignment(
-  uid: string,
-  data: Omit<Assignment, 'id'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'assignments'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, 'assignments');
-    throw err;
-  }
-}
-
-export async function updateUserAssignmentStatus(
-  assignmentId: string,
-  status: 'Pending' | 'In Progress' | 'Submitted'
-): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'assignments', assignmentId), {
-      status,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `assignments/${assignmentId}`);
-    throw err;
-  }
-}
-
-export async function deleteUserAssignment(assignmentId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'assignments', assignmentId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `assignments/${assignmentId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 3. ACADEMIC NOTES SERVICE
-// ==========================================
-
-export async function fetchUserNotes(uid: string): Promise<AcademicNote[]> {
-  try {
-    const list: AcademicNote[] = [];
-    // 1. Try user subcollection first
-    try {
-      const subColRef = collection(db, 'users', uid, 'notes');
-      const subSnap = await getDocs(subColRef);
-      subSnap.forEach((d) => {
-        list.push({ ...(d.data() as AcademicNote), id: d.id, ownerId: uid });
-      });
-    } catch (_) {}
-
-    // 2. Also check root collection
-    const q = query(
-      collection(db, 'notes'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      if (!list.some((existing) => existing.id === d.id)) {
-        list.push({ ...(d.data() as AcademicNote), id: d.id, ownerId: uid });
-      }
-    });
-    // Sort by date newest first
-    list.sort((a, b) => new Date(b.date || b.createdAt || 0).getTime() - new Date(a.date || a.createdAt || 0).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'notes');
-    return [];
-  }
-}
-
-export async function createUserNote(
-  uid: string,
-  data: Omit<AcademicNote, 'id'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'notes'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, 'notes');
-    throw err;
-  }
-}
-
-export async function deleteUserNote(noteId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'notes', noteId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `notes/${noteId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 4. ACADEMIC GOALS SERVICE
-// ==========================================
-
-export async function fetchUserGoals(uid: string): Promise<AcademicGoal[]> {
-  try {
-    const list: AcademicGoal[] = [];
-    // 1. Try user subcollection first
-    try {
-      const subColRef = collection(db, 'users', uid, 'goals');
-      const subSnap = await getDocs(subColRef);
-      subSnap.forEach((d) => {
-        list.push({ ...(d.data() as AcademicGoal), id: d.id, ownerId: uid });
-      });
-    } catch (_) {}
-
-    // 2. Also check root collection
-    const q = query(
-      collection(db, 'goals'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      if (!list.some((existing) => existing.id === d.id)) {
-        list.push({ ...(d.data() as AcademicGoal), id: d.id, ownerId: uid });
-      }
-    });
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'goals');
-    return [];
-  }
-}
-
-export async function createUserGoal(
-  uid: string,
-  data: Omit<AcademicGoal, 'id' | 'createdAt' | 'ownerId'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'goals'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, 'goals');
-    throw err;
-  }
-}
-
-export async function updateGoalProgress(
-  goalId: string,
-  progress: number,
-  completed: boolean
-): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'goals', goalId), {
-      progress: Math.min(100, Math.max(0, progress)),
-      completed,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `goals/${goalId}`);
-    throw err;
-  }
-}
-
-export async function deleteUserGoal(goalId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'goals', goalId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `goals/${goalId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 5. FOCUS SESSIONS SERVICE
-// ==========================================
-
-export async function fetchUserFocusSessions(uid: string): Promise<FocusSession[]> {
-  try {
-    const q = query(
-      collection(db, 'focus_sessions'),
-      where('ownerId', '==', uid)
-    );
-    const snap = await getDocs(q);
-    const list: FocusSession[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as FocusSession), id: d.id });
-    });
-    list.sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, 'focus_sessions');
-    return [];
-  }
-}
-
-export async function logFocusSession(
-  uid: string,
-  data: Omit<FocusSession, 'id' | 'ownerId'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'focus_sessions'), {
-      ...data,
-      ownerId: uid,
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, 'focus_sessions');
-    throw err;
-  }
-}
-
-// ==========================================
-// 6. ACADEMIC EXAMS SERVICE
-// ==========================================
-
-export async function fetchUserExams(uid: string): Promise<AcademicExam[]> {
-  try {
-    // Try user subcollection first
-    const subColRef = collection(db, 'users', uid, 'exams');
-    const subSnap = await getDocs(subColRef);
-    const list: AcademicExam[] = [];
-
-    subSnap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicExam), id: d.id, ownerId: uid });
-    });
-
-    // Also check root collection for backward compatibility
-    if (list.length === 0) {
-      const rootQ = query(collection(db, 'exams'), where('ownerId', '==', uid));
-      const rootSnap = await getDocs(rootQ);
-      rootSnap.forEach((d) => {
-        list.push({ ...(d.data() as AcademicExam), id: d.id, ownerId: uid });
-      });
-    }
-
-    // Sort by exam date ascending
-    list.sort((a, b) => new Date(`${a.examDate}T${a.time || '00:00'}`).getTime() - new Date(`${b.examDate}T${b.time || '00:00'}`).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `users/${uid}/exams`);
-    return [];
-  }
-}
-
-export async function createUserExam(
-  uid: string,
-  data: Omit<AcademicExam, 'id' | 'ownerId'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'users', uid, 'exams'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `users/${uid}/exams`);
-    throw err;
-  }
-}
-
-export async function updateUserExam(
-  uid: string,
-  examId: string,
-  data: Partial<AcademicExam>
-): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'users', uid, 'exams', examId), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    try {
-      await updateDoc(doc(db, 'exams', examId), {
-        ...data,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${uid}/exams/${examId}`);
-      throw err;
-    }
-  }
-}
-
-export async function deleteUserExam(uid: string, examId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'users', uid, 'exams', examId));
-  } catch (err) {
-    // Fallback delete root
-    try {
-      await deleteDoc(doc(db, 'exams', examId));
-    } catch {
-      handleFirestoreError(err, OperationType.DELETE, `users/${uid}/exams/${examId}`);
-      throw err;
-    }
-  }
-}
-
-// ==========================================
-// 7. BRIAN'S KNOWLEDGE VAULT SERVICE
-// ==========================================
-
-export async function fetchUserKnowledgeEntries(uid: string): Promise<KnowledgeEntry[]> {
-  try {
-    const subColRef = collection(db, 'users', uid, 'knowledge');
-    const snap = await getDocs(subColRef);
-    const list: KnowledgeEntry[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as KnowledgeEntry), id: d.id, ownerId: uid });
-    });
-    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `users/${uid}/knowledge`);
-    return [];
-  }
-}
-
-export async function createKnowledgeEntry(
-  uid: string,
-  data: Omit<KnowledgeEntry, 'id' | 'ownerId' | 'createdAt'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'users', uid, 'knowledge'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `users/${uid}/knowledge`);
-    throw err;
-  }
-}
-
-export async function updateKnowledgeEntry(
-  uid: string,
-  entryId: string,
-  data: Partial<KnowledgeEntry>
-): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'users', uid, 'knowledge', entryId), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `users/${uid}/knowledge/${entryId}`);
-    throw err;
-  }
-}
-
-export async function deleteKnowledgeEntry(uid: string, entryId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'users', uid, 'knowledge', entryId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `users/${uid}/knowledge/${entryId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 8. REVISION CENTER TOPICS SERVICE
-// ==========================================
-
-export async function fetchUserRevisionTopics(uid: string): Promise<RevisionTopic[]> {
-  try {
-    const subColRef = collection(db, 'users', uid, 'revision');
-    const snap = await getDocs(subColRef);
-    const list: RevisionTopic[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as RevisionTopic), id: d.id, ownerId: uid });
-    });
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `users/${uid}/revision`);
-    return [];
-  }
-}
-
-export async function createRevisionTopic(
-  uid: string,
-  data: Omit<RevisionTopic, 'id' | 'ownerId'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'users', uid, 'revision'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `users/${uid}/revision`);
-    throw err;
-  }
-}
-
-export async function updateRevisionTopic(
-  uid: string,
-  topicId: string,
-  data: Partial<RevisionTopic>
-): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'users', uid, 'revision', topicId), {
-      ...data,
-      lastRevisedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `users/${uid}/revision/${topicId}`);
-    throw err;
-  }
-}
-
-export async function deleteRevisionTopic(uid: string, topicId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'users', uid, 'revision', topicId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `users/${uid}/revision/${topicId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 9. ACADEMIC CALENDAR SERVICE
-// ==========================================
-
-export async function fetchUserCalendarEvents(uid: string): Promise<CalendarEvent[]> {
-  try {
-    const subColRef = collection(db, 'users', uid, 'calendar');
-    const snap = await getDocs(subColRef);
-    const list: CalendarEvent[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as CalendarEvent), id: d.id, ownerId: uid });
-    });
-    list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `users/${uid}/calendar`);
-    return [];
-  }
-}
-
-export async function createCalendarEvent(
-  uid: string,
-  data: Omit<CalendarEvent, 'id' | 'ownerId'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'users', uid, 'calendar'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `users/${uid}/calendar`);
-    throw err;
-  }
-}
-
-export async function deleteCalendarEvent(uid: string, eventId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'users', uid, 'calendar', eventId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `users/${uid}/calendar/${eventId}`);
-    throw err;
-  }
-}
-
-// ==========================================
-// 10. NOTIFICATIONS SERVICE
-// ==========================================
-
-export async function fetchUserNotifications(uid: string): Promise<AcademicNotification[]> {
-  try {
-    const subColRef = collection(db, 'users', uid, 'notifications');
-    const snap = await getDocs(subColRef);
-    const list: AcademicNotification[] = [];
-    snap.forEach((d) => {
-      list.push({ ...(d.data() as AcademicNotification), id: d.id, ownerId: uid });
-    });
-    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return list;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.LIST, `users/${uid}/notifications`);
-    return [];
-  }
-}
-
-export async function createNotification(
-  uid: string,
-  data: Omit<AcademicNotification, 'id' | 'ownerId' | 'createdAt'>
-): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'users', uid, 'notifications'), {
-      ...data,
-      ownerId: uid,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `users/${uid}/notifications`);
-    throw err;
-  }
-}
-
-export async function markNotificationAsRead(uid: string, notifId: string): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'users', uid, 'notifications', notifId), {
-      read: true,
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `users/${uid}/notifications/${notifId}`);
-    throw err;
-  }
-}
-
-export async function markAllNotificationsAsRead(
-  uid: string,
-  notifications?: AcademicNotification[]
-): Promise<void> {
-  try {
-    let unreadList = notifications;
-    if (!unreadList) {
-      unreadList = await fetchUserNotifications(uid);
-    }
-    const unread = unreadList.filter((n) => !n.read);
-    await Promise.all(
-      unread.map((n) => updateDoc(doc(db, 'users', uid, 'notifications', n.id), { read: true }))
-    );
-  } catch (err) {
-    console.error('Failed to mark all as read:', err);
-  }
-}
-
-export async function deleteNotification(uid: string, notifId: string): Promise<void> {
-  try {
-    await deleteDoc(doc(db, 'users', uid, 'notifications', notifId));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `users/${uid}/notifications/${notifId}`);
-    throw err;
-  }
-}
-
-// Aliases for unified naming across all views
-export const createAcademicExam = createUserExam;
-export const updateAcademicExam = updateUserExam;
-export const deleteAcademicExam = deleteUserExam;
-
-export const fetchUserKnowledgeItems = fetchUserKnowledgeEntries;
-export const createKnowledgeItem = createKnowledgeEntry;
-export const updateKnowledgeItem = updateKnowledgeEntry;
-export const deleteKnowledgeItem = deleteKnowledgeEntry;
-
-export const createAcademicNotification = createNotification;
-export const deleteAcademicNotification = deleteNotification;
-
+export const createAcademicExam=createUserExam;
+export const updateAcademicExam=updateUserExam;
+export const deleteAcademicExam=deleteUserExam;
+export const fetchUserKnowledgeItems=fetchUserKnowledgeEntries;
+export const createKnowledgeItem=createKnowledgeEntry;
+export const updateKnowledgeItem=updateKnowledgeEntry;
+export const deleteKnowledgeItem=deleteKnowledgeEntry;
+export const createAcademicNotification=createNotification;
+export const deleteAcademicNotification=deleteNotification;
