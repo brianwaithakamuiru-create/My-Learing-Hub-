@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth, mapFirebaseAuthError } from '../../context/AuthContext';
+import { useAuth, mapSupabaseAuthError } from '../../context/AuthContext';
 import {
   Eye,
   EyeOff,
@@ -68,13 +68,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({
     setIsSubmitting(true);
 
     try {
-      // Execute REAL Firebase Authentication
+      // Execute REAL Supabase Authentication
       await signIn(cleanEmail, password, rememberMe);
       onSuccess();
     } catch (err: any) {
       const code = err?.code || '';
       setErrorCode(code);
-      const friendly = mapFirebaseAuthError(err);
+      const friendly = mapSupabaseAuthError(err);
       setErrorMessage(friendly);
     } finally {
       setIsSubmitting(false);
