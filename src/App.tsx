@@ -153,7 +153,7 @@ function MainApp() {
     }
   };
 
-  // 1. Loading screen while Firebase verifies initial authentication
+  // 1. Loading screen while Supabase verifies the initial authentication
   if (loading) {
     return (
       <LibraryBackground>
